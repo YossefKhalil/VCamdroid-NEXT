@@ -48,6 +48,8 @@ class ConnectionManager private constructor() : Connection.Listener {
 
     private var connectionStateCallback: ConnectionStateCallback? = null
     private var onBytesReceivedCallback: ((buffer: ByteArray, bytes: Int) -> Unit)? = null
+    private val pendingBytes = java.io.ByteArrayOutputStream()
+    private val pendingLock = Any()
 
     private var tcpConn: TCPConnection? = null
 
@@ -63,6 +65,15 @@ class ConnectionManager private constructor() : Connection.Listener {
      */
     fun setOnBytesReceivedCallback(onBytesReceivedCallback: (buffer: ByteArray, bytes: Int) -> Unit) {
         this.onBytesReceivedCallback = onBytesReceivedCallback
+        // Flush any bytes that arrived before the callback was registered (race
+        // between the desktop's activation packet and StreamActivity creation).
+        synchronized(pendingLock) {
+            if (pendingBytes.size() > 0) {
+                val buffered = pendingBytes.toByteArray()
+                pendingBytes.reset()
+                onBytesReceivedCallback(buffered, buffered.size)
+            }
+        }
     }
 
     /**
@@ -108,7 +119,15 @@ class ConnectionManager private constructor() : Connection.Listener {
     }
 
     override fun onBytesReceived(buffer: ByteArray, bytes: Int) {
-        onBytesReceivedCallback?.let { it(buffer, bytes) }
+        val cb = onBytesReceivedCallback
+        if (cb != null) {
+            cb(buffer, bytes)
+        } else {
+            // Buffer until StreamActivity registers its handler.
+            synchronized(pendingLock) {
+                pendingBytes.write(buffer, 0, bytes)
+            }
+        }
     }
 
     override fun onDisconnected() {
