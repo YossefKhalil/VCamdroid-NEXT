@@ -6,6 +6,7 @@
 #include "gui/theme.h"
 #include "settings.h"
 #include "video/guipreviewscaler.h"
+#include <algorithm>
 #include <iomanip>
 
 Application::Application()
@@ -200,15 +201,13 @@ void Application::OnDeviceConnected(DeviceDescriptor& descriptor) const
 		UpdateAvailableDevices();
 		mainWindow->SetStatus(copy.name(), Material::Colors().primary);
 
-		// Auto-switch to a freshly connected device when nothing is streaming,
-		// so pairing a phone starts the video without an extra click.
-		if (rtspManager->GetStreamingDevice() < 0 && !rtspManager->GetDescriptors().empty())
+		// Auto-switch to the freshly connected device so pairing a phone starts
+		// the video immediately. StartStreamForDevice also moves the UI to the
+		// preview page, so the QR code is not left on screen while connecting.
+		if (!rtspManager->GetDescriptors().empty())
 		{
 			const int newId = static_cast<int>(rtspManager->GetDescriptors().size()) - 1;
-			mainWindow->GetSourceChoice()->SetSelection(newId + 1);
-			wxCommandEvent evt(wxEVT_CHOICE, mainWindow->GetSourceChoice()->GetId());
-			evt.SetEventObject(mainWindow->GetSourceChoice());
-			mainWindow->GetEventHandler()->ProcessEvent(evt);
+			const_cast<Application*>(this)->StartStreamForDevice(newId);
 		}
 	});
 }
@@ -223,22 +222,24 @@ void Application::OnDeviceDisconnected(DeviceDescriptor& descriptor) const
 		mainWindow->GetTaskbarIcon()->ShowBalloon("Stream ended",
 			"Streaming device " + copy.name() + " disconnected!", 10, wxICON_INFORMATION);
 
-		// Check if the device that just disconnected was the active streaming device
-		// If it was reset the canvas to blank
-		int streamingDeviceId = rtspManager->GetStreamingDevice();
-		if (streamingDeviceId >= 0 && streamingDeviceId < static_cast<int>(rtspManager->GetDescriptors().size()))
-		{
-			const auto& streamingDescriptor = rtspManager->GetDescriptors()[streamingDeviceId];
-			if (streamingDescriptor == copy)
-			{
-				mainWindow->GetCanvas()->Clear();
-				streamLive = false;
-				mainWindow->SetStreaming(false);
-			}
-		}
+		// Remember whether the device that just disconnected was the one we
+		// were receiving from. RemoveDescriptor stops the RTSP receiver and
+		// repairs the descriptor indices for us.
+		const int streamingId = rtspManager->GetStreamingDevice();
+		const bool wasStreaming =
+			streamingId >= 0 &&
+			streamingId < static_cast<int>(rtspManager->GetDescriptors().size()) &&
+			rtspManager->GetDescriptors()[streamingId] == copy;
 
-		// Remove from manager
 		rtspManager->RemoveDescriptor(copy);
+
+		if (wasStreaming)
+		{
+			streamLive = false;
+			if (mainWindow->GetCanvas())
+				mainWindow->GetCanvas()->Clear();
+			mainWindow->SetStreaming(false);
+		}
 
 		// Update UI list
 		UpdateAvailableDevices();
@@ -388,50 +389,66 @@ void Application::OnMenuEvent(wxCommandEvent& event)
 	}
 }
 
-void Application::OnSourceChanged(wxEvent& event)
+void Application::StartStreamForDevice(int deviceId)
 {
-	int deviceId = mainWindow->GetSourceChoice()->GetSelection() - 1;
-
-	// Safety: Handle empty list or "No devices" placeholder
-	if (deviceId == wxNOT_FOUND || rtspManager->GetDescriptors().empty())
+	const auto& descriptors = rtspManager->GetDescriptors();
+	if (deviceId < 0 || deviceId >= static_cast<int>(descriptors.size()))
 		return;
 
-	const auto& descriptor = rtspManager->GetDescriptors()[deviceId];
+	const auto& descriptor = descriptors[deviceId];
 
 	EnsureStateInitialized(descriptor.name(), descriptor);
 	auto& state = stateRegistry[descriptor.name()];
 
-	// Validate Resolution exists in current capabilities
-	bool resFound = false;
-	const auto& resList = state.backCameraActive ? descriptor.backResolutions() : descriptor.frontResolutions();
+	// Validate the cached resolution against the current camera capabilities.
+	const auto& resList = state.backCameraActive
+		? descriptor.backResolutions()
+		: descriptor.frontResolutions();
 
-	if (!resList.empty())
+	if (resList.empty())
 	{
-		for (size_t i = 0; i < resList.size(); i++)
-		{
-			if (resList[i] == state.resolution)
-			{
-				resFound = true;
-				break;
-			}
-		}
-		if (!resFound)
-			state.resolution = resList[0];
+		mainWindow->GetTaskbarIcon()->ShowBalloon("Error",
+			"Device reported no supported resolutions.", 10, wxICON_WARNING);
+		return;
 	}
-	else
-	{
-		// Handle error case: Device reported 0 resolutions
-		mainWindow->GetTaskbarIcon()->ShowBalloon("Error", "Device reported no supported resolutions.", 10, wxICON_WARNING);
-	}
+
+	if (std::find(resList.begin(), resList.end(), state.resolution) == resList.end())
+		state.resolution = resList.front();
+
+	// Keep the source selector in sync with the device that is streaming.
+	if (mainWindow->GetSourceChoice()->GetSelection() != deviceId + 1)
+		mainWindow->GetSourceChoice()->SetSelection(deviceId + 1);
 
 	rtspManager->Connect2Stream(deviceId, state);
 
 	streamLive = false;
-	mainWindow->SetStreaming(false);
+	mainWindow->ShowPreviewPage();
 	mainWindow->SetStatus("Connecting", Material::Colors().tertiary);
-
-	// Update UI Zoom Label to match state
 	mainWindow->GetZoomLevelLabel()->SetLabelText(wxString::Format("%.1fx", state.zoom));
+}
+
+void Application::StopStreaming()
+{
+	if (rtspManager)
+		rtspManager->Disconnect();
+
+	streamLive = false;
+	if (mainWindow)
+	{
+		if (mainWindow->GetCanvas())
+			mainWindow->GetCanvas()->Clear();
+		mainWindow->SetStreaming(false);
+	}
+}
+
+void Application::OnSourceChanged(wxEvent& event)
+{
+	// Index 0 is the "Select device" placeholder.
+	const int deviceId = mainWindow->GetSourceChoice()->GetSelection() - 1;
+	if (deviceId < 0)
+		return;
+
+	StartStreamForDevice(deviceId);
 }
 
 void Application::OnWindowCloseEvent(wxCloseEvent& event)

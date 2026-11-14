@@ -38,6 +38,8 @@ private:
 
 	void UpdateAvailableDevices() const;
 
+	void StartStreamForDevice(int deviceId);
+	void StopStreaming();
 	void OnSourceChanged(wxEvent& event);
 
 	void ShowAdjustmentsDialog(wxCommandEvent& event);

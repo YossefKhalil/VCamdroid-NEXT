@@ -58,9 +58,25 @@ Server::HostInfo Server::GetHostInfo()
 
 void Server::Send(int id, const unsigned char* bytes, size_t size) const
 {
-	if (id >= 0 && id < connections.size())
+	std::shared_ptr<Connection> connection;
 	{
-		connections[id]->Send(bytes, size);
+		std::lock_guard<std::mutex> lock(connectionsMutex);
+		if (id < 0 || id >= static_cast<int>(connections.size()))
+			return;
+		connection = connections[id];
+	}
+
+	// Send outside the lock so a stalled socket never blocks accept/erase.
+	if (connection)
+	{
+		try
+		{
+			connection->Send(bytes, size);
+		}
+		catch (const std::exception& e)
+		{
+			logger << "[SERVER] Send failed: " << e.what() << "\n";
+		}
 	}
 }
 
@@ -107,8 +123,15 @@ void Server::Close()
 	asio::error_code ec;
 	acceptor.close(ec);
 	if (ec) logger << "[SERVER] Error closing acceptor: " << ec.message() << "\n";
-	
-	for (std::shared_ptr<Connection> conn : connections)
+
+	// Snapshot the list so closing a socket (which can complete on the I/O
+	// thread) never races with the erase in OnConnectionDisconnected.
+	std::vector<std::shared_ptr<Connection>> connectionsCopy;
+	{
+		std::lock_guard<std::mutex> lock(connectionsMutex);
+		connectionsCopy = connections;
+	}
+	for (std::shared_ptr<Connection>& conn : connectionsCopy)
 	{
 		conn->Close(true);
 	}
@@ -194,7 +217,11 @@ void Server::TCPDoAccept()
 					std::bind(&Server::OnConnectionDisconnected, this, std::placeholders::_1),
 					std::bind(&Server::OnConnectionReportingError, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3)
 				);
-				connections.push_back(std::move(conn));
+				{
+					std::lock_guard<std::mutex> lock(connectionsMutex);
+					connections.push_back(conn);
+				}
+				conn->Start();
 
 				connectionListener.OnDeviceConnected(descriptor);
 			}
@@ -218,7 +245,10 @@ void Server::OnConnectionDisconnected(std::shared_ptr<Connection> connection)
 {
 	logger << "[SERVER] Device disconnected: " << connection->descriptor.name() << std::endl;
 
-	connections.erase(std::remove(connections.begin(), connections.end(), connection), connections.end());
+	{
+		std::lock_guard<std::mutex> lock(connectionsMutex);
+		connections.erase(std::remove(connections.begin(), connections.end(), connection), connections.end());
+	}
 	connectionListener.OnDeviceDisconnected(connection->descriptor);
 }
 

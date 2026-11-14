@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <functional>
+#include <atomic>
 #include <asio.hpp>
 
 #include "devicedescriptor.h"
@@ -28,13 +29,21 @@ public:
 	};
 
 	Connection(tcp::socket socket, DeviceDescriptor& descriptor, OnDisconnectedListener onDisconnectedListener, OnBytesReceived onBytesReceived);
+
+	/// <summary>
+	/// Begins the disconnect-detection read loop. Called by Server once the
+	/// shared_ptr exists, so the async handler can keep the connection alive.
+	/// </summary>
+	void Start();
+
 private:
 
 	OnDisconnectedListener onDisconnectedListener;
 	OnBytesReceived onBytesReceived;
 
 	tcp::socket socket;
-	unsigned char* byteBuffer;
+	unsigned char byteBuffer[255];
+	std::atomic<bool> closed{ false };
 
 	bool active;
 	DeviceDescriptor descriptor;

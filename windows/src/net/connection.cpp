@@ -8,14 +8,22 @@ Connection::Connection(tcp::socket socket, DeviceDescriptor& descriptor, OnDisco
 	onDisconnectedListener(onDisconnectedListener),
 	onBytesReceived(onBytesReceived)
 {
-	byteBuffer = new unsigned char[255];
 	active = false;
+}
+
+void Connection::Start()
+{
 	Read();
 }
 
 void Connection::Read()
 {
-	socket.async_read_some(asio::buffer(byteBuffer, 255), [this](asio::error_code ec, size_t bytes) {
+	// Keep the connection alive for as long as the async read is outstanding.
+	// Without this, Server::OnConnectionDisconnected can destroy the object
+	// while this handler is still running.
+	auto self = shared_from_this();
+
+	socket.async_read_some(asio::buffer(byteBuffer, sizeof(byteBuffer)), [this, self](asio::error_code ec, size_t bytes) {
 		if (!ec)
 		{
 			try
@@ -26,7 +34,8 @@ void Connection::Read()
 			{
 				logger << "[CONNECTION] onBytesReceived failed: " << e.what() << std::endl;
 			}
-			Read();
+			if (!closed)
+				Read();
 		}
 		else
 		{
@@ -49,16 +58,29 @@ void Connection::Read()
 
 void Connection::Send(std::string message)
 {
-	socket.send(asio::buffer(message));
+	Send(reinterpret_cast<const unsigned char*>(message.data()), message.size());
 }
 
 void Connection::Send(const unsigned char* bytes, size_t size)
 {
-	socket.send(asio::buffer(bytes, size));
+	if (closed)
+		return;
+
+	// The socket can be torn down by the I/O thread at any time, so never let
+	// a UI-thread command escape as an exception.
+	asio::error_code ec;
+	socket.send(asio::buffer(bytes, size), 0, ec);
+	if (ec)
+		logger << "[CONNECTION] Send failed: " << ec.message() << std::endl;
 }
 
 void Connection::Close(bool stoppedByServer)
 {
+	// Read errors and Server::Close can race; only the first caller reports the
+	// disconnect (and only once).
+	if (closed.exchange(true))
+		return;
+
 	if (stoppedByServer)
 	{
 		// Sometimes socket.cancel() makes the app to not respond
@@ -66,11 +88,14 @@ void Connection::Close(bool stoppedByServer)
 		// port forwarding
 		// TODO...
 		//socket.cancel();
-		socket.close();
+		asio::error_code ec;
+		socket.close(ec);
 	}
 	else
 	{
-		socket.close();
-		onDisconnectedListener(this->shared_from_this());
+		asio::error_code ec;
+		socket.close(ec);
+		if (onDisconnectedListener)
+			onDisconnectedListener(this->shared_from_this());
 	}
 }

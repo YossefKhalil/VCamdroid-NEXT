@@ -64,6 +64,7 @@ Window::Window(Server::HostInfo hostinfo)
 	taskbarIcon = new wxTaskBarIcon();
 	taskbarIcon->SetIcon(appIcon, "VCamdroid NEXT");
 	taskbarIcon->Bind(wxEVT_TASKBAR_LEFT_DCLICK, &Window::MaximizeFromTaskbar, this);
+	taskbarIcon->Bind(wxEVT_TASKBAR_RIGHT_UP, [this](wxTaskBarIconEvent&) { ShowTaskbarMenu(); });
 	Bind(wxEVT_ICONIZE, &Window::MinimizeToTaskbar, this);
 
 	SetIcon(appIcon);
@@ -385,6 +386,23 @@ void Window::ShowQrPage()
 	Layout();
 }
 
+// Switch to the preview as soon as a stream is requested, so a connected
+// device never leaves the user staring at the pairing QR code while the
+// RTSP connection is still being established.
+void Window::ShowPreviewPage()
+{
+	contentPage = 1;
+	if (book)
+		book->ChangeSelection(1);
+	backButton->Hide();
+	qrButton->Show();
+	sourceCard->Show();
+	toolbarCard->Show();
+	titleLabel->SetLabel("VCamdroid NEXT");
+	backButton->GetParent()->Layout();
+	Layout();
+}
+
 void Window::ShowSettingsPage()
 {
 	if (book)
@@ -424,6 +442,32 @@ void Window::GoBack()
 	titleLabel->SetLabel("VCamdroid NEXT");
 	backButton->GetParent()->Layout();
 	Layout();
+}
+
+void Window::ShowTaskbarMenu()
+{
+	wxMenu menu;
+	menu.Append(wxID_OPEN, "Open VCamdroid NEXT");
+	menu.AppendSeparator();
+	menu.Append(wxID_EXIT, "Exit");
+
+	menu.Bind(wxEVT_MENU, [this](wxCommandEvent& event)
+	{
+		if (event.GetId() == wxID_OPEN)
+		{
+			Iconize(false);
+			Show();
+			Raise();
+			SetFocus();
+		}
+		else if (event.GetId() == wxID_EXIT)
+		{
+			Close(true);
+		}
+	});
+
+	if (taskbarIcon)
+		taskbarIcon->PopupMenu(&menu);
 }
 
 void Window::MinimizeToTaskbar(wxIconizeEvent& evt)

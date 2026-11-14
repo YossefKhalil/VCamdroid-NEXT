@@ -69,10 +69,12 @@ public:
 	void SetStatus(const wxString& text, const wxColour& dotColor);
 	void SetStreaming(bool live);
 	void ShowQrPage();
+	void ShowPreviewPage();
 
 	void ShowSettingsPage();
 	void ShowDevicesPage(const std::vector<DeviceDescriptor>& devices);
 	void GoBack();
+	void ShowTaskbarMenu();
 	void SetSettingsChangedCallback(std::function<void()> callback) { settingsChanged = std::move(callback); }
 
 private:

@@ -3,6 +3,9 @@
 #include "logger.h"
 #include "net/serializer.h"
 
+#include <algorithm>
+#include <iterator>
+
 namespace RTSP
 {
 	Manager::Manager(const Server& server, OnFrameReceivedCallback onFrameReceivedCallback, OnStatsReceivedCallback onStatsReceivedCallback) 
@@ -19,17 +22,46 @@ namespace RTSP
 
 	void Manager::RemoveDescriptor(DeviceDescriptor& descriptor)
 	{
-		descriptors.erase(std::remove(descriptors.begin(), descriptors.end(), descriptor));
+		auto it = std::find(descriptors.begin(), descriptors.end(), descriptor);
+		if (it == descriptors.end())
+			return;
+
+		const int removedIndex = static_cast<int>(std::distance(descriptors.begin(), it));
+
+		if (removedIndex == streamingDevice)
+		{
+			// The active device went away: stop retrying its RTSP URL and clear
+			// the streaming index so the next device can auto-start.
+			Disconnect();
+		}
+		else if (removedIndex < streamingDevice)
+		{
+			// Indices are also the connection ids used by Server::Send, so they
+			// shift together when a connection is removed.
+			--streamingDevice;
+		}
+
+		descriptors.erase(it);
+	}
+
+	void Manager::Disconnect()
+	{
+		Stop();
+		streamingDevice = -1;
 	}
 
 	void Manager::Connect2Stream(int descriptorId, const StreamOptions& options)
 	{
+		if (descriptorId < 0 || descriptorId >= static_cast<int>(descriptors.size()))
+			return;
+
 		this->streamingDevice = descriptorId;
 
 		auto& descriptor = descriptors[descriptorId];
 		auto& url = descriptor.url();
 
-		logger << "[RTSP Manager] Connecting to stream " << url << "\n";
+		logger << "[RTSP Manager] Connecting to stream " << url
+			<< " (" << descriptor.protocol() << ")\n";
 		
 		Stop();
 		

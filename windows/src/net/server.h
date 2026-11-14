@@ -2,6 +2,7 @@
 
 #include <tuple>
 #include <thread>
+#include <mutex>
 #include <asio.hpp>
 #include <string>
 
@@ -53,6 +54,7 @@ private:
 	std::thread thread;
 
 	std::vector<std::shared_ptr<Connection>> connections;
+	mutable std::mutex connectionsMutex;
 
 	void TCPDoAccept();
 	void OnConnectionDisconnected(std::shared_ptr<Connection> connection);

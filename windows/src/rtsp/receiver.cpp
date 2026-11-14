@@ -62,7 +62,8 @@ namespace RTSP
 		{
 			char buffer[512];
 			av_strerror(ret, buffer, 512);
-			logger << "[RTSP] Error: Could not open stream\n";
+			logger << "[RTSP] Error: Could not open stream " << rtspUrl
+				<< " (" << rtspProtocol << "): " << buffer << "\n";
 			return false;
 		}
 

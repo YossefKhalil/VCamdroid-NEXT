@@ -328,8 +328,12 @@ namespace Material
 		int minWidth = 220;
 		int hovered = -1;
 		bool dismissed = false;
+		int shadowMarginX = 0;
+		int shadowMarginY = 0;
+		bool dwmConfigured = false;
 
 		void Recompute();
+		void ApplyRoundedShape();
 		int HitTest(int y) const;
 		void Activate(int index);
 	};

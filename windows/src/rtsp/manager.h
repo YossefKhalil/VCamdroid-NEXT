@@ -40,6 +40,7 @@ namespace RTSP
 		void RemoveDescriptor(DeviceDescriptor& descriptor);
 
 		void Connect2Stream(int descriptorId, const StreamOptions& options);
+		void Disconnect();
 
 		const std::vector<DeviceDescriptor>& GetDescriptors() const;
 		const int& GetStreamingDevice() const;

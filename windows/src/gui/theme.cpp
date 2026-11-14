@@ -245,30 +245,159 @@ namespace Material
 
 	namespace
 	{
-		void AddCircle(wxGraphicsPath& path, double cx, double cy, double r)
+		// Adds an SVG path definition (M/L/H/V/C/S/Z, absolute and relative)
+		// to a wxGraphicsPath. This lets the UI use the exact Material icon
+		// path data instead of hand-approximated shapes.
+		void AddSvgPath(wxGraphicsPath& path, const wxString& definition)
 		{
-			path.AddCircle(cx, cy, r);
-		}
+			const wxChar* p = definition.c_str();
+			auto skipSeparators = [&]()
+			{
+				while (*p == ' ' || *p == ',' || *p == '\t' || *p == '\n' || *p == '\r')
+					++p;
+			};
+			auto readNumber = [&]() -> double
+			{
+				skipSeparators();
+				wxChar* end = nullptr;
+				const double value = wxStrtod(p, &end);
+				if (end != p)
+					p = end;
+				return value;
+			};
 
-		void AddLine(wxGraphicsPath& path, double x1, double y1, double x2, double y2)
-		{
-			path.MoveToPoint(x1, y1);
-			path.AddLineToPoint(x2, y2);
-		}
+			double x = 0.0, y = 0.0;
+			double startX = 0.0, startY = 0.0;
+			double lastControlX = 0.0, lastControlY = 0.0;
+			char command = 0;
+			char previousCommand = 0;
 
-		void AddArrow(wxGraphicsPath& path, double tipX, double tipY, double dx, double dy, double size)
-		{
-			const double len = std::sqrt(dx * dx + dy * dy);
-			if (len <= 0.0)
-				return;
-			const double ux = dx / len;
-			const double uy = dy / len;
-			const double px = -uy;
-			const double py = ux;
-			path.MoveToPoint(tipX, tipY);
-			path.AddLineToPoint(tipX - ux * size + px * size * 0.6, tipY - uy * size + py * size * 0.6);
-			path.MoveToPoint(tipX, tipY);
-			path.AddLineToPoint(tipX - ux * size - px * size * 0.6, tipY - uy * size - py * size * 0.6);
+			skipSeparators();
+			while (*p)
+			{
+				if (wxIsalpha(*p))
+				{
+					command = static_cast<char>(*p++);
+				}
+				else if (command == 'M')
+				{
+					command = 'L';
+				}
+				else if (command == 'm')
+				{
+					command = 'l';
+				}
+
+				const bool relative = wxIslower(command) != 0;
+				const char upper = static_cast<char>(wxToupper(command));
+
+				if (upper == 'Z')
+				{
+					path.CloseSubpath();
+					x = startX;
+					y = startY;
+					previousCommand = 'Z';
+				}
+				else if (upper == 'M')
+				{
+					double nx = readNumber();
+					double ny = readNumber();
+					if (relative)
+					{
+						nx += x;
+						ny += y;
+					}
+					x = nx;
+					y = ny;
+					startX = x;
+					startY = y;
+					path.MoveToPoint(x, y);
+					previousCommand = 'M';
+				}
+				else if (upper == 'L')
+				{
+					double nx = readNumber();
+					double ny = readNumber();
+					if (relative)
+					{
+						nx += x;
+						ny += y;
+					}
+					path.AddLineToPoint(nx, ny);
+					x = nx;
+					y = ny;
+					previousCommand = 'L';
+				}
+				else if (upper == 'H')
+				{
+					double nx = readNumber();
+					if (relative)
+						nx += x;
+					path.AddLineToPoint(nx, y);
+					x = nx;
+					previousCommand = 'H';
+				}
+				else if (upper == 'V')
+				{
+					double ny = readNumber();
+					if (relative)
+						ny += y;
+					path.AddLineToPoint(x, ny);
+					y = ny;
+					previousCommand = 'V';
+				}
+				else if (upper == 'C')
+				{
+					double x1 = readNumber();
+					double y1 = readNumber();
+					double x2 = readNumber();
+					double y2 = readNumber();
+					double nx = readNumber();
+					double ny = readNumber();
+					if (relative)
+					{
+						x1 += x; y1 += y;
+						x2 += x; y2 += y;
+						nx += x; ny += y;
+					}
+					path.AddCurveToPoint(x1, y1, x2, y2, nx, ny);
+					lastControlX = x2;
+					lastControlY = y2;
+					x = nx;
+					y = ny;
+					previousCommand = 'C';
+				}
+				else if (upper == 'S')
+				{
+					double x2 = readNumber();
+					double y2 = readNumber();
+					double nx = readNumber();
+					double ny = readNumber();
+					const bool smooth = previousCommand == 'C' || previousCommand == 'S';
+					const double x1 = smooth ? 2.0 * x - lastControlX : x;
+					const double y1 = smooth ? 2.0 * y - lastControlY : y;
+					if (relative)
+					{
+						x2 += x; y2 += y;
+						nx += x; ny += y;
+					}
+					path.AddCurveToPoint(x1, y1, x2, y2, nx, ny);
+					lastControlX = x2;
+					lastControlY = y2;
+					x = nx;
+					y = ny;
+					previousCommand = 'S';
+				}
+				else
+				{
+					// Unsupported command: consume one number so the parser
+					// cannot spin on malformed input.
+					readNumber();
+					previousCommand = upper;
+				}
+
+				skipSeparators();
+			}
 		}
 	}
 
@@ -294,240 +423,164 @@ namespace Material
 		{
 			case Icon::QrCode:
 			{
-				path.AddRoundedRectangle(3.5, 3.5, 6, 6, 1.4);
-				path.AddRoundedRectangle(14.5, 3.5, 6, 6, 1.4);
-				path.AddRoundedRectangle(3.5, 14.5, 6, 6, 1.4);
-				path.MoveToPoint(14.5, 14.5);
-				path.AddLineToPoint(20.5, 14.5);
-				path.MoveToPoint(14.5, 17.5);
-				path.AddLineToPoint(20.5, 17.5);
-				path.MoveToPoint(14.5, 20.5);
-				path.AddLineToPoint(20.5, 20.5);
-				path.MoveToPoint(17.5, 14.5);
-				path.AddLineToPoint(17.5, 20.5);
+				// Material Icons "qr_code" (24dp), exact path data.
+				AddSvgPath(path, "M3 11h8V3H3v8zm2-6h4v4H5V5zM3 21h8v-8H3v8zm2-6h4v4H5v-4zM13 3v8h8V3h-8zm6 6h-4V5h4v4zM19 19h2v2h-2zM13 13h2v2h-2zM15 15h2v2h-2zM13 17h2v2h-2zM15 19h2v2h-2zM17 17h2v2h-2zM17 13h2v2h-2zM19 15h2v2h-2z");
+				fill = true;
 				break;
 			}
 			case Icon::Devices:
 			{
-				path.AddRoundedRectangle(3.5, 4.5, 12, 9, 1.6);
-				path.MoveToPoint(9.5, 17.5);
-				path.AddLineToPoint(9.5, 20.5);
-				path.MoveToPoint(6.5, 20.5);
-				path.AddLineToPoint(12.5, 20.5);
-				path.AddRoundedRectangle(16, 10, 4.5, 9.5, 1.4);
+				// Material Icons "devices" (24dp), exact path data.
+				AddSvgPath(path, "M4 6h18V4H4c-1.1 0-2 .9-2 2v11H0v3h14v-3H4V6zm19 2h-6c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h6c.55 0 1-.45 1-1V9c0-.55-.45-1-1-1zm-1 9h-4v-7h4v7z");
+				fill = true;
 				break;
 			}
 			case Icon::Settings:
 			case Icon::StreamSettings:
+			case Icon::Gear:
+			{
+				// Material Icons "settings" (24dp), exact path data.
+				AddSvgPath(path, "M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94L14.4 2.81c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41L9.25 5.35C8.66 5.59 8.12 5.92 7.63 6.29L5.24 5.33c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58C4.84 11.36 4.8 11.69 4.8 12s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.03-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z");
+				fill = true;
+				break;
+			}
 			case Icon::Adjustments:
 			{
-				const bool tune = icon != Icon::Settings;
-				AddLine(path, 4, tune ? 7 : 6, 20, tune ? 7 : 6);
-				AddLine(path, 4, 12, 20, 12);
-				AddLine(path, 4, tune ? 17 : 18, 20, tune ? 17 : 18);
-				path.CloseSubpath();
-				gc->StrokePath(path);
-
-				wxGraphicsPath knobs = gc->CreatePath();
-				AddCircle(knobs, 9, tune ? 7 : 6, 2.2);
-				AddCircle(knobs, 15, 12, 2.2);
-				AddCircle(knobs, 8, tune ? 17 : 18, 2.2);
-				gc->SetBrush(wxBrush(color));
-				gc->FillPath(knobs);
-				gc->PopState();
-				return;
+				// Material Icons "tune" (24dp), exact path data.
+				AddSvgPath(path, "M3 17v2h6v-2H3zM3 5v2h10V5H3zm10 16v-2h8v-2h-8v-2h-2v6h2zM7 9v2H3v2h4v2h2V9H7zm14 4v-2H11v2h10zm-6-4h2V7h4V5h-4V3h-2v6z");
+				fill = true;
+				break;
 			}
 			case Icon::MoreVert:
 			{
-				gc->SetBrush(wxBrush(color));
-				wxGraphicsPath dots = gc->CreatePath();
-				AddCircle(dots, 12, 5.5, 1.9);
-				AddCircle(dots, 12, 12, 1.9);
-				AddCircle(dots, 12, 18.5, 1.9);
-				gc->FillPath(dots);
-				gc->PopState();
-				return;
+				// Material Icons "more_vert" (24dp), exact path data.
+				AddSvgPath(path, "M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z");
+				fill = true;
+				break;
 			}
 			case Icon::RotateLeft:
+			{
+				// Material Icons "rotate_left" (24dp), exact path data.
+				AddSvgPath(path, "M7.11 8.53L5.7 7.11C4.8 8.27 4.24 9.61 4.07 11h2.02c.14-.87.49-1.72 1.02-2.47zM6.09 13H4.07c.17 1.39.72 2.73 1.62 3.89l1.41-1.42c-.52-.75-.87-1.59-1.01-2.47zm1.01 5.32c1.16.9 2.51 1.44 3.9 1.61V17.9c-.87-.15-1.71-.49-2.46-1.03L7.1 18.32zM13 4.07V1L8.45 5.55 13 10V6.09c2.84.48 5 2.94 5 5.91s-2.16 5.43-5 5.91v2.02c3.95-.49 7-3.85 7-7.93s-3.05-7.44-7-7.93z");
+				fill = true;
+				break;
+			}
 			case Icon::RotateRight:
 			{
-				const bool mirror = icon == Icon::RotateLeft;
-				auto drawRotate = [&]()
-				{
-					wxGraphicsPath arc = gc->CreatePath();
-					arc.AddArc(12, 12, 7.0, Deg(300), Deg(600), true);
-					gc->SetPen(wxPen(color, strokeWidth));
-					gc->SetBrush(*wxTRANSPARENT_BRUSH);
-					gc->StrokePath(arc);
-
-					const double a = Deg(240);
-					const double endX = 12 + 7.0 * std::cos(a);
-					const double endY = 12 + 7.0 * std::sin(a);
-					double dx = -std::sin(a);
-					double dy = std::cos(a);
-					const double len = std::sqrt(dx * dx + dy * dy);
-					dx /= len; dy /= len;
-					const double px = -dy, py = dx;
-					const double size = 4.2, halfWidth = 2.4;
-
-					wxGraphicsPath arrow = gc->CreatePath();
-					arrow.MoveToPoint(endX, endY);
-					arrow.AddLineToPoint(endX - dx * size + px * halfWidth, endY - dy * size + py * halfWidth);
-					arrow.AddLineToPoint(endX - dx * size - px * halfWidth, endY - dy * size - py * halfWidth);
-					arrow.CloseSubpath();
-					gc->SetPen(*wxTRANSPARENT_PEN);
-					gc->SetBrush(wxBrush(color));
-					gc->FillPath(arrow);
-				};
-
-				if (mirror)
-				{
-					gc->PushState();
-					gc->Translate(24, 0);
-					gc->Scale(-1, 1);
-					drawRotate();
-					gc->PopState();
-				}
-				else
-				{
-					drawRotate();
-				}
-
-				gc->PopState();
-				return;
+				// Material Icons "rotate_right" (24dp), exact path data.
+				AddSvgPath(path, "M15.55 5.55L11 1v3.07C7.06 4.56 4 7.92 4 12s3.05 7.44 7 7.93v-2.02c-2.84-.48-5-2.94-5-5.91s2.16-5.43 5-5.91V10l4.55-4.45zM19.93 11c-.17-1.39-.72-2.73-1.62-3.89l-1.42 1.42c.54.75.88 1.6 1.02 2.47h2.02zM13 17.9v2.02c1.39-.17 2.74-.71 3.9-1.61l-1.44-1.44c-.75.54-1.59.89-2.46 1.03zm3.89-2.42l1.42 1.41c.9-1.16 1.45-2.5 1.62-3.89h-2.02c-.14.87-.48 1.72-1.02 2.48z");
+				fill = true;
+				break;
 			}
 			case Icon::FlipHorizontal:
 			{
-				AddLine(path, 12, 4, 12, 20);
-				path.MoveToPoint(9, 8);
-				path.AddLineToPoint(3.5, 12);
-				path.AddLineToPoint(9, 16);
-				path.CloseSubpath();
-				path.MoveToPoint(15, 8);
-				path.AddLineToPoint(20.5, 12);
-				path.AddLineToPoint(15, 16);
-				path.CloseSubpath();
+				// Material Icons "flip" (24dp), exact path data.
+				AddSvgPath(path, "M15 21h2v-2h-2v2zm4-12h2V7h-2v2zM3 5v14c0 1.1.9 2 2 2h4v-2H5V5h4V3H5c-1.1 0-2 .9-2 2zm16-2v2h2c0-1.1-.9-2-2-2zm-8 20h2V1h-2v22zm8-6h2v-2h-2v2zM15 5h2V3h-2v2zm4 8h2v-2h-2v2zm0 8c1.1 0 2-.9 2-2h-2v2z");
 				fill = true;
 				break;
 			}
 			case Icon::FlipVertical:
 			{
-				AddLine(path, 4, 12, 20, 12);
-				path.MoveToPoint(8, 9);
-				path.AddLineToPoint(12, 3.5);
-				path.AddLineToPoint(16, 9);
-				path.CloseSubpath();
-				path.MoveToPoint(8, 15);
-				path.AddLineToPoint(12, 20.5);
-				path.AddLineToPoint(16, 15);
-				path.CloseSubpath();
+				// The standard "flip" icon rotated a quarter turn.
+				gc->PushState();
+				gc->Translate(12, 12);
+				gc->Rotate(Deg(90));
+				gc->Translate(-12, -12);
+				AddSvgPath(path, "M15 21h2v-2h-2v2zm4-12h2V7h-2v2zM3 5v14c0 1.1.9 2 2 2h4v-2H5V5h4V3H5c-1.1 0-2 .9-2 2zm16-2v2h2c0-1.1-.9-2-2-2zm-8 20h2V1h-2v22zm8-6h2v-2h-2v2zM15 5h2V3h-2v2zm4 8h2v-2h-2v2zm0 8c1.1 0 2-.9 2-2h-2v2z");
 				fill = true;
+				gc->PopState();
 				break;
 			}
 			case Icon::ZoomIn:
+			{
+				// Material Icons "zoom_in" (24dp), exact path data.
+				AddSvgPath(path, "M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14zM12 10h-2v2H9v-2H7V9h2V7h1v2h2v1z");
+				fill = true;
+				break;
+			}
 			case Icon::ZoomOut:
 			{
-				path.AddCircle(10.5, 10.5, 6.2);
-				AddLine(path, 15, 15, 20.2, 20.2);
-				AddLine(path, 7.5, 10.5, 13.5, 10.5);
-				if (icon == Icon::ZoomIn)
-					AddLine(path, 10.5, 7.5, 10.5, 13.5);
+				// Material Icons "zoom_out" (24dp), exact path data.
+				AddSvgPath(path, "M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14zM7 9h5v1H7z");
+				fill = true;
 				break;
 			}
 			case Icon::Flash:
 			{
-				path.MoveToPoint(13.5, 2.5);
-				path.AddLineToPoint(5.5, 13.5);
-				path.AddLineToPoint(10.8, 13.5);
-				path.AddLineToPoint(9.0, 21.5);
-				path.AddLineToPoint(18.5, 10.0);
-				path.AddLineToPoint(13.0, 10.0);
-				path.CloseSubpath();
+				// Material Icons "flash_on" (24dp), exact path data.
+				AddSvgPath(path, "M7 2v11h3v9l7-12h-4l4-8z");
 				fill = true;
 				break;
 			}
 			case Icon::SwapCamera:
 			{
-				path.AddRoundedRectangle(3.5, 6.5, 17, 11, 2.0);
-				path.AddCircle(12, 12, 3.6);
-				AddLine(path, 5.5, 4.0, 8.5, 4.0);
-				AddLine(path, 15.5, 4.0, 18.5, 4.0);
+				// Material Icons "flip_camera_android" (24dp), exact path data.
+				AddSvgPath(path, "M9 12c0 1.66 1.34 3 3 3s3-1.34 3-3-1.34-3-3-3-3 1.34-3 3zM8 10V8H5.09C6.47 5.61 9.05 4 12 4c3.72 0 6.85 2.56 7.74 6h2.06c-.93-4.56-4.96-8-9.8-8C8.73 2 5.82 3.58 4 6.01V4H2v6h6zM16 14v2h2.91c-1.38 2.39-3.96 4-6.91 4-3.72 0-6.85-2.56-7.74-6H2.2c.93 4.56 4.96 8 9.8 8 3.27 0 6.18-1.58 8-4.01V20h2v-6h-6z");
+				fill = true;
 				break;
 			}
 			case Icon::Snapshot:
 			{
-				path.AddRoundedRectangle(3.5, 7.5, 17, 12, 2.0);
-				path.MoveToPoint(8.5, 7.5);
-				path.AddLineToPoint(9.8, 4.5);
-				path.AddLineToPoint(14.2, 4.5);
-				path.AddLineToPoint(15.5, 7.5);
-				path.AddCircle(12, 13.0, 4.0);
+				// Material Icons "photo_camera" (24dp), exact path data.
+				path.AddCircle(12, 12, 3.2);
+				AddSvgPath(path, "M9 2L7.17 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2h-3.17L15 2H9zm3 15c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5z");
+				fill = true;
 				break;
 			}
 			case Icon::Close:
 			{
-				AddLine(path, 6, 6, 18, 18);
-				AddLine(path, 18, 6, 6, 18);
+				// Material Icons "close" (24dp), exact path data.
+				AddSvgPath(path, "M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z");
+				fill = true;
 				break;
 			}
 			case Icon::Check:
 			{
-				path.MoveToPoint(5, 12.5);
-				path.AddLineToPoint(10, 17.5);
-				path.AddLineToPoint(19, 7.0);
+				// Material Icons "check" (24dp), exact path data.
+				AddSvgPath(path, "M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z");
+				fill = true;
 				break;
 			}
 			case Icon::Info:
 			{
-				path.AddCircle(12, 12, 8.5);
-				AddLine(path, 12, 10.5, 12, 16.5);
+				// Material Icons "info" (24dp), exact path data.
+				AddSvgPath(path, "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z");
+				fill = true;
 				break;
 			}
 			case Icon::Exit:
 			{
-				path.AddRoundedRectangle(4.5, 5.5, 9, 13, 1.6);
-				AddLine(path, 10, 12, 20, 12);
-				AddArrow(path, 20, 12, 1, 0, 4.0);
+				// Material Icons "logout" (24dp), exact path data.
+				AddSvgPath(path, "M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z");
+				fill = true;
 				break;
 			}
 			case Icon::Stats:
 			{
-				path.AddRoundedRectangle(4.5, 13.5, 3.4, 6, 1.0);
-				path.AddRoundedRectangle(10.3, 8.5, 3.4, 11, 1.0);
-				path.AddRoundedRectangle(16.1, 4.5, 3.4, 15, 1.0);
+				// Material Icons "bar_chart" (24dp), exact path data.
+				AddSvgPath(path, "M4 9h4v11H4zM16 13h4v7h-4zM10 4h4v16h-4z");
 				fill = true;
 				break;
 			}
 			case Icon::ChevronDown:
 			{
-				path.MoveToPoint(6.5, 9.5);
-				path.AddLineToPoint(12, 15);
-				path.AddLineToPoint(17.5, 9.5);
+				// Material Icons "expand_more" (24dp), exact path data.
+				AddSvgPath(path, "M16.59 8.59L12 13.17 7.41 8.59 6 10l6 6 6-6z");
+				fill = true;
 				break;
 			}
 			case Icon::Refresh:
 			{
-				path.AddArc(12, 12, 7.8, Deg(35), Deg(300), true);
-				AddArrow(path, 12 + 7.8 * std::cos(Deg(35)), 12 + 7.8 * std::sin(Deg(35)), 1, 1, 4.0);
+				// Material Icons "refresh" (24dp), exact path data.
+				AddSvgPath(path, "M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z");
+				fill = true;
 				break;
 			}
 			case Icon::ArrowBack:
 			{
-				path.MoveToPoint(19, 12);
-				path.AddLineToPoint(5.5, 12);
-				AddArrow(path, 5.5, 12, -1, 0, 4.5);
-				break;
-			}
-			case Icon::Gear:
-			{
-				path.AddCircle(12, 12, 6.2);
-				path.AddCircle(12, 12, 2.4);
-				for (int i = 0; i < 8; i++)
-				{
-					const double a = Deg(i * 45.0);
-					path.MoveToPoint(12 + 6.2 * std::cos(a), 12 + 6.2 * std::sin(a));
-					path.AddLineToPoint(12 + 8.6 * std::cos(a), 12 + 8.6 * std::sin(a));
-				}
+				// Material Icons "arrow_back" (24dp), exact path data.
+				AddSvgPath(path, "M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z");
+				fill = true;
 				break;
 			}
 		}
@@ -1059,6 +1112,31 @@ namespace Material
 		SetDoubleBuffered(true);
 		SetBackgroundColour(Colors().surfaceContainerHigh);
 
+		// The popup is a top-level window, so DWM would otherwise add its own
+		// shadow margin and corner rounding on top of our drawn surface. That
+		// shifted the menu away from its anchor and left stair-stepped notches
+		// at the corners. Disabling non-client rendering makes the window rect
+		// match the drawn client area exactly.
+#ifdef __WXMSW__
+		{
+			HWND hwnd = static_cast<HWND>(GetHandle());
+			HMODULE dwm = LoadLibraryW(L"dwmapi.dll");
+			if (dwm)
+			{
+				typedef HRESULT(WINAPI* Fn)(HWND, DWORD, LPCVOID, DWORD);
+				auto setAttr = reinterpret_cast<Fn>(GetProcAddress(dwm, "DwmSetWindowAttribute"));
+				if (setAttr)
+				{
+					const int policy = 2; // DWMNCRP_DISABLED
+					setAttr(hwnd, 2, &policy, sizeof(policy)); // DWMWA_NCRENDERING_POLICY
+					const int cornerPref = 1; // DWMWCP_DONOTROUND
+					setAttr(hwnd, 33, &cornerPref, sizeof(cornerPref)); // DWMWA_WINDOW_CORNER_PREFERENCE
+				}
+				FreeLibrary(dwm);
+			}
+		}
+#endif
+
 		Bind(wxEVT_PAINT, &MenuPopup::OnPaint, this);
 		Bind(wxEVT_MOTION, &MenuPopup::OnMouseMove, this);
 		Bind(wxEVT_LEFT_UP, &MenuPopup::OnLeftUp, this);
@@ -1111,6 +1189,69 @@ namespace Material
 		height += padding;
 
 		SetSize(wxSize(width, height));
+		ApplyRoundedShape();
+	}
+
+	// The popup is a top-level window, so the OS would otherwise apply its own
+	// corner rounding and reveal whatever sits behind the square window corners.
+	// Clipping the window to the same rounded rectangle that OnPaint draws keeps
+	// the menu surface clean on every Windows version.
+	void MenuPopup::ApplyRoundedShape()
+	{
+#ifdef __WXMSW__
+		if (!dwmConfigured)
+		{
+			HWND hwnd = static_cast<HWND>(GetHandle());
+			HMODULE dwm = LoadLibraryW(L"dwmapi.dll");
+			if (dwm)
+			{
+				typedef HRESULT(WINAPI* Fn)(HWND, DWORD, LPCVOID, DWORD);
+				auto setAttr = reinterpret_cast<Fn>(GetProcAddress(dwm, "DwmSetWindowAttribute"));
+				if (setAttr)
+				{
+					const int policy = 2; // DWMNCRP_DISABLED
+					setAttr(hwnd, 2, &policy, sizeof(policy)); // DWMWA_NCRENDERING_POLICY
+					const int cornerPref = 1; // DWMWCP_DONOTROUND
+					setAttr(hwnd, 33, &cornerPref, sizeof(cornerPref)); // DWMWA_WINDOW_CORNER_PREFERENCE
+				}
+				FreeLibrary(dwm);
+			}
+
+			RECT wr;
+			::GetWindowRect(hwnd, &wr);
+			POINT pt = { 0, 0 };
+			::ClientToScreen(hwnd, &pt);
+			shadowMarginX = pt.x - wr.left;
+			shadowMarginY = pt.y - wr.top;
+			dwmConfigured = true;
+		}
+#endif
+
+		const int radius = FromDIP(12);
+		if (radius <= 0 || width <= 0 || height <= 0)
+			return;
+
+		const int steps = 64;
+		std::vector<wxPoint> points;
+		points.reserve(4 * (steps + 1));
+
+		auto addCorner = [&](double cx, double cy, double startDegrees)
+		{
+			for (int i = 0; i <= steps; ++i)
+			{
+				const double angle = Deg(startDegrees + 90.0 * i / steps);
+				points.push_back(wxPoint(
+					static_cast<int>(std::lround(cx + radius * std::cos(angle))),
+					static_cast<int>(std::lround(cy + radius * std::sin(angle)))));
+			}
+		};
+
+		addCorner(radius, radius, 180.0);
+		addCorner(width - radius, radius, 270.0);
+		addCorner(width - radius, height - radius, 0.0);
+		addCorner(radius, height - radius, 90.0);
+
+		SetShape(wxRegion(static_cast<int>(points.size()), points.data()));
 	}
 
 	int MenuPopup::HitTest(int y) const
@@ -1315,14 +1456,19 @@ namespace Material
 		if (displayIndex == wxNOT_FOUND)
 			displayIndex = 0;
 		const wxRect display = wxDisplay(displayIndex).GetClientArea();
-		if (position.x + width > display.GetRight())
-			position.x = display.GetRight() - width;
-		if (position.y + height > display.GetBottom())
-			position.y = display.GetBottom() - height;
+		if (position.x + width + shadowMarginX > display.GetRight())
+			position.x = display.GetRight() - width - shadowMarginX;
+		if (position.y + height + shadowMarginY > display.GetBottom())
+			position.y = display.GetBottom() - height - shadowMarginY;
 		if (position.x < display.x)
 			position.x = display.x;
 		if (position.y < display.y)
 			position.y = display.y;
+
+		// The window rect includes the DWM shadow margin; compensate so the
+		// drawn surface (client area) sits exactly on the anchor.
+		position.x -= shadowMarginX;
+		position.y -= shadowMarginY;
 
 		SetPosition(position);
 		Popup();
@@ -1494,7 +1640,8 @@ namespace Material
 		std::vector<MenuItem> menuItems;
 		for (size_t i = 0; i < items.size(); i++)
 		{
-			menuItems.push_back(MenuItem::Radio(static_cast<int>(i) + 1, items[i],
+			// Material 3 dropdown menus mark the current value with a check.
+			menuItems.push_back(MenuItem::Check(static_cast<int>(i) + 1, items[i],
 				static_cast<int>(i) == selection));
 		}
 
