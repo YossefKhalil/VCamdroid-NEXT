@@ -30,6 +30,9 @@ public:
 
 	Connection(tcp::socket socket, DeviceDescriptor& descriptor, OnDisconnectedListener onDisconnectedListener, OnBytesReceived onBytesReceived);
 
+	int Id() const { return id; }
+	void SetId(int value) { id = value; }
+
 	/// <summary>
 	/// Begins the disconnect-detection read loop. Called by Server once the
 	/// shared_ptr exists, so the async handler can keep the connection alive.
@@ -44,6 +47,7 @@ private:
 	tcp::socket socket;
 	unsigned char byteBuffer[255];
 	std::atomic<bool> closed{ false };
+	int id = -1;
 
 	bool active;
 	DeviceDescriptor descriptor;

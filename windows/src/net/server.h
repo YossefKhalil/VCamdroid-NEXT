@@ -3,6 +3,7 @@
 #include <tuple>
 #include <thread>
 #include <mutex>
+#include <map>
 #include <asio.hpp>
 #include <string>
 
@@ -53,7 +54,8 @@ private:
 
 	std::thread thread;
 
-	std::vector<std::shared_ptr<Connection>> connections;
+	std::map<int, std::shared_ptr<Connection>> connections;
+	int nextConnectionId = 0;
 	mutable std::mutex connectionsMutex;
 
 	void TCPDoAccept();

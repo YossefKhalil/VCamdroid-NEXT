@@ -33,6 +33,10 @@ class StreamActivity : AppCompatActivity(), SurfaceHolder.Callback, ConnectionMa
     // coalesced packets. Accumulate bytes and only dispatch complete packets.
     private val receiveAccumulator = ByteArrayOutputStream()
 
+    // ACTIVATION can arrive before the SurfaceView is ready. Hold the options
+    // and start the stream from surfaceCreated instead of racing the EGL setup.
+    private var pendingActivation: StreamOptions? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -43,8 +47,10 @@ class StreamActivity : AppCompatActivity(), SurfaceHolder.Callback, ConnectionMa
 
         setContentView(viewBinding.root)
 
-        connectionManager.setOnBytesReceivedCallback(::onBytesReceived)
+        // Create the streamer before registering the byte callback: the
+        // callback may fire immediately with a buffered ACTIVATION packet.
         streamer = Streamer(StreamOptions(), this, viewBinding.surfaceView)
+        connectionManager.setOnBytesReceivedCallback(::onBytesReceived)
 
         // Register after the streamer exists. If the surface is already
         // available this invokes surfaceCreated immediately.
@@ -60,6 +66,10 @@ class StreamActivity : AppCompatActivity(), SurfaceHolder.Callback, ConnectionMa
     override fun surfaceCreated(holder: SurfaceHolder) {
         if (holder.surface != null && holder.surface.isValid) {
             streamer.startPreview()
+            pendingActivation?.let {
+                pendingActivation = null
+                streamer.startStream(it)
+            }
         }
     }
 
@@ -67,6 +77,13 @@ class StreamActivity : AppCompatActivity(), SurfaceHolder.Callback, ConnectionMa
 
     override fun surfaceDestroyed(holder: SurfaceHolder) {
         streamer.stop()
+    }
+
+    override fun onDestroy() {
+        // Never leave the callback pointing at a destroyed activity; otherwise
+        // a late packet after MainActivity resumes would touch dead state.
+        connectionManager.setOnBytesReceivedCallback(null)
+        super.onDestroy()
     }
 
     override fun onDisconnected() {
@@ -108,7 +125,11 @@ class StreamActivity : AppCompatActivity(), SurfaceHolder.Callback, ConnectionMa
         when (type) {
             PacketType.ACTIVATION -> {
                 val options = StreamOptions.deserialize(buffer)
-                streamer.startStream(options)
+                if (viewBinding.surfaceView.holder.surface?.isValid == true) {
+                    streamer.startStream(options)
+                } else {
+                    pendingActivation = options
+                }
             }
             PacketType.CAMERA -> {
                 streamer.switchCamera()

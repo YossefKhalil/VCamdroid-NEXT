@@ -68,5 +68,8 @@ namespace RTSP
 
 		std::vector<DeviceDescriptor> descriptors;
 		int streamingDevice;
+		StreamOptions lastOptions;
+
+		void SendToStreamingDevice(const unsigned char* bytes, size_t size);
 	};
 };

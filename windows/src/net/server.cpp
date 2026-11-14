@@ -61,9 +61,10 @@ void Server::Send(int id, const unsigned char* bytes, size_t size) const
 	std::shared_ptr<Connection> connection;
 	{
 		std::lock_guard<std::mutex> lock(connectionsMutex);
-		if (id < 0 || id >= static_cast<int>(connections.size()))
+		auto it = connections.find(id);
+		if (it == connections.end())
 			return;
-		connection = connections[id];
+		connection = it->second;
 	}
 
 	// Send outside the lock so a stalled socket never blocks accept/erase.
@@ -129,7 +130,8 @@ void Server::Close()
 	std::vector<std::shared_ptr<Connection>> connectionsCopy;
 	{
 		std::lock_guard<std::mutex> lock(connectionsMutex);
-		connectionsCopy = connections;
+		for (const auto& [id, conn] : connections)
+			connectionsCopy.push_back(conn);
 	}
 	for (std::shared_ptr<Connection>& conn : connectionsCopy)
 	{
@@ -154,6 +156,14 @@ void Server::TCPDoAccept()
 		if (!ec)
 		{
 			logger << "[SERVER] Device connected." << socket.remote_endpoint() << std::endl;
+
+			// Never let a half-open connection block the I/O thread forever.
+			// The descriptor is small; five seconds is plenty.
+			{
+				DWORD timeoutMs = 5000;
+				setsockopt(socket.native_handle(), SOL_SOCKET, SO_RCVTIMEO,
+					reinterpret_cast<const char*>(&timeoutMs), sizeof(timeoutMs));
+			}
 
 			// Read the only message sent by the client (the device descriptor).
 			// The descriptor is variable-length, so read its fields exactly instead
@@ -219,7 +229,10 @@ void Server::TCPDoAccept()
 				);
 				{
 					std::lock_guard<std::mutex> lock(connectionsMutex);
-					connections.push_back(conn);
+					const int id = nextConnectionId++;
+					conn->SetId(id);
+					descriptor.SetConnectionId(id);
+					connections[id] = conn;
 				}
 				conn->Start();
 
@@ -247,7 +260,7 @@ void Server::OnConnectionDisconnected(std::shared_ptr<Connection> connection)
 
 	{
 		std::lock_guard<std::mutex> lock(connectionsMutex);
-		connections.erase(std::remove(connections.begin(), connections.end(), connection), connections.end());
+		connections.erase(connection->Id());
 	}
 	connectionListener.OnDeviceDisconnected(connection->descriptor);
 }

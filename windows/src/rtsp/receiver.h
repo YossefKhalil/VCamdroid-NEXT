@@ -40,6 +40,12 @@ namespace RTSP
         void Start(std::string url, std::string protocol, int width, int height);
         void Stop();
 
+        /// <summary>
+        /// Called before a retry so the owner can re-send the activation
+        /// packet if the first one was lost while the phone was starting.
+        /// </summary>
+        void SetRetryCallback(std::function<void()> callback) { onRetryCallback = std::move(callback); }
+
     private:
 
         /// <summary>
@@ -58,6 +64,7 @@ namespace RTSP
 
         OnFrameReceivedCallback onFrameReceivedCallback;
 		OnStatsReceivedCallback onStatsReceivedCallback;
+		std::function<void()> onRetryCallback;
 
         std::thread workerThread;
         std::atomic<bool> isRunning;

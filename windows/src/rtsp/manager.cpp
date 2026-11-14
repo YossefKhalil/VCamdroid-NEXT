@@ -13,10 +13,60 @@ namespace RTSP
 		server(server)
 	{
 		streamingDevice = -1;
+
+		// If RTSP is not up yet (the phone is still creating StreamActivity),
+		// repeat the activation packet so the stream eventually starts even
+		// when the first packet arrives before the phone is listening.
+		SetRetryCallback([this]()
+		{
+			if (streamingDevice >= 0 && streamingDevice < static_cast<int>(descriptors.size()))
+			{
+				auto serialized = Serializer::SerializeStreamOptions(lastOptions);
+				serialized[0] = Command::ACTIVATION;
+				SendToStreamingDevice( serialized.data(), serialized.size());
+			}
+		});
+	}
+
+	void Manager::SendToStreamingDevice(const unsigned char* bytes, size_t size)
+	{
+		if (streamingDevice < 0 || streamingDevice >= static_cast<int>(descriptors.size()))
+			return;
+
+		const int id = descriptors[streamingDevice].connectionId();
+		if (id >= 0)
+			server.Send(id, bytes, size);
 	}
 
 	void Manager::AddDescriptor(DeviceDescriptor& descriptor)
 	{
+		// A reconnect can produce a second descriptor for the same stream URL
+		// before the old connection's disconnect is processed. Replace the old
+		// entry instead of stacking duplicates.
+		const std::string url = descriptor.url();
+		auto existing = std::find_if(descriptors.begin(), descriptors.end(),
+			[&url](const DeviceDescriptor& item) { return item.url() == url; });
+
+		if (existing != descriptors.end())
+		{
+			const int index = static_cast<int>(std::distance(descriptors.begin(), existing));
+			if (index == streamingDevice)
+			{
+				Disconnect();
+			}
+			else if (index < streamingDevice)
+			{
+				--streamingDevice;
+			}
+			descriptors.erase(existing);
+		}
+
+		logger << "[RTSP Manager] Device descriptor: " << descriptor.name()
+			<< " url=" << descriptor.url()
+			<< " front=" << descriptor.frontResolutions().size()
+			<< " back=" << descriptor.backResolutions().size()
+			<< " filters=" << descriptor.filters().size() << "\n";
+
 		descriptors.push_back(std::move(descriptor));
 	}
 
@@ -62,13 +112,15 @@ namespace RTSP
 
 		logger << "[RTSP Manager] Connecting to stream " << url
 			<< " (" << descriptor.protocol() << ")\n";
+
+		lastOptions = options;
 		
 		Stop();
 		
 		auto serializedOptions = Serializer::SerializeStreamOptions(options);
 		serializedOptions[0] = Command::ACTIVATION;
 
-		server.Send(streamingDevice, serializedOptions.data(), serializedOptions.size());
+		SendToStreamingDevice( serializedOptions.data(), serializedOptions.size());
 
 		Start(url, descriptor.protocol(), options.resolution.first, options.resolution.second);
 	}
@@ -83,13 +135,13 @@ namespace RTSP
 			static_cast<unsigned char>(height >> 8),		// High byte of height
 		};
 
-		server.Send(streamingDevice, bytes, 5);
+		SendToStreamingDevice( bytes, 5);
 	}
 
 	void Manager::SetFPS(int fps)
 	{
 		const unsigned char bytes[2] = { Command::FPS, (uint8_t)fps };
-		server.Send(streamingDevice, bytes, 2);
+		SendToStreamingDevice( bytes, 2);
 	}
 
 	void Manager::SetBitrate(int bitrate)
@@ -99,7 +151,7 @@ namespace RTSP
 			static_cast<unsigned char>(bitrate & 0xFF),		// Low byte of bitrate
 			static_cast<unsigned char>(bitrate >> 8),         // High byte of bitrate
 		};
-		server.Send(streamingDevice, bytes, 3);
+		SendToStreamingDevice( bytes, 3);
 	}
 
 	void Manager::SetAdaptiveBitrate(int min, int max)
@@ -111,43 +163,43 @@ namespace RTSP
 			static_cast<unsigned char>(max & 0xFF),		// Low byte of bitrate
 			static_cast<unsigned char>(max >> 8),         // High byte of bitrate
 		};
-		server.Send(streamingDevice, bytes, 5);
+		SendToStreamingDevice( bytes, 5);
 	}
 
 	void Manager::SetStabilization(bool enabled)
 	{
 		const unsigned char bytes[2] = { Command::STABILIZATION, enabled ? 1 : 0 };
-		server.Send(streamingDevice, bytes, 2);
+		SendToStreamingDevice( bytes, 2);
 	}
 
 	void Manager::SetFlash(bool enabled)
 	{
 		const unsigned char bytes[2] = { Command::FLASH, enabled ? 1 : 0 };
-		server.Send(streamingDevice, bytes, 2);
+		SendToStreamingDevice( bytes, 2);
 	}
 
 	void Manager::SetFocusMode(int mode)
 	{
 		const unsigned char bytes[2] = { Command::FOCUS, (uint8_t)mode };
-		server.Send(streamingDevice, bytes, 2);
+		SendToStreamingDevice( bytes, 2);
 	}
 
 	void Manager::SetH265Codec(bool enabled)
 	{
 		const unsigned char bytes[2] = { Command::CODEC, enabled ? 1 : 0 };
-		server.Send(streamingDevice, bytes, 2);
+		SendToStreamingDevice( bytes, 2);
 	}
 
 	void Manager::SwapCamera()
 	{
 		const unsigned char bytes[1] = { Command::CAMERA };
-		server.Send(streamingDevice, bytes, 1);
+		SendToStreamingDevice( bytes, 1);
 	}
 
 	void Manager::Rotate(uint8_t degrees)
 	{
 		const unsigned char bytes[2] = { Command::ROTATION, degrees };
-		server.Send(streamingDevice, bytes, 2);
+		SendToStreamingDevice( bytes, 2);
 	}
 
 	void Manager::Zoom(float factor)
@@ -163,19 +215,19 @@ namespace RTSP
 			static_cast<unsigned char>((bits >> 24) & 0xFF),
 		};
 
-		server.Send(streamingDevice, bytes, 5);
+		SendToStreamingDevice( bytes, 5);
 	}
 
 	void Manager::FlipHorizontally()
 	{
 		const unsigned char bytes[2] = { Command::FLIP, 1 };
-		server.Send(streamingDevice, bytes, 2);
+		SendToStreamingDevice( bytes, 2);
 	}
 
 	void Manager::FlipVertically()
 	{
 		const unsigned char bytes[2] = { Command::FLIP, 0 };
-		server.Send(streamingDevice, bytes, 2);
+		SendToStreamingDevice( bytes, 2);
 	}
 
 	void Manager::ApplyCorrectionFilter(std::string filterName, int value)
@@ -194,7 +246,7 @@ namespace RTSP
 		packet.insert(packet.end(), filterName.begin(), filterName.end());
 		packet.push_back(static_cast<uint8_t>(value));
 
-		server.Send(streamingDevice, packet.data(), packet.size());
+		SendToStreamingDevice( packet.data(), packet.size());
 	}
 
 	void Manager::ApplyEffectFilter(std::string filterName)
@@ -211,7 +263,7 @@ namespace RTSP
 		packet.push_back(nameLen);
 		packet.insert(packet.end(), filterName.begin(), filterName.end());
 
-		server.Send(streamingDevice, packet.data(), packet.size());
+		SendToStreamingDevice( packet.data(), packet.size());
 	}
 
 	const std::vector<DeviceDescriptor>& Manager::GetDescriptors() const

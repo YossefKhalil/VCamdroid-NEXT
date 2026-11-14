@@ -5,6 +5,7 @@
 #include "gui/qrconview.h"
 #include "gui/theme.h"
 #include "settings.h"
+#include "logger.h"
 #include "video/guipreviewscaler.h"
 #include <algorithm>
 #include <iomanip>
@@ -251,6 +252,7 @@ void Application::OnDeviceErrorReported(DeviceDescriptor& descriptor, const Conn
 {
 	const std::string deviceName = descriptor.name();
 	Connection::ErrorReport copy = error;
+	logger << "[DEVICE ERROR] " << deviceName << ": " << copy.error << " - " << copy.description << "\n";
 	mainWindow->GetEventHandler()->CallAfter([this, deviceName, copy]() {
 		if (!mainWindow)
 			return;
@@ -413,7 +415,32 @@ void Application::StartStreamForDevice(int deviceId)
 	}
 
 	if (std::find(resList.begin(), resList.end(), state.resolution) == resList.end())
-		state.resolution = resList.front();
+	{
+		// Prefer a sane, light default over whatever happens to be first in
+		// the (descending) capability list. Falling back to 4K on a phone
+		// that does not advertise 640x480 would make prepareVideo fail.
+		auto pick = [&](int width, int height) -> bool
+		{
+			auto it = std::find(resList.begin(), resList.end(), std::make_pair(width, height));
+			if (it != resList.end())
+			{
+				state.resolution = *it;
+				return true;
+			}
+			return false;
+		};
+
+		if (!pick(1280, 720) && !pick(640, 480) && !pick(1920, 1080) &&
+			!pick(854, 480) && !pick(1280, 960) && !pick(1600, 1200))
+		{
+			state.resolution = resList.back();
+		}
+	}
+
+	logger << "[STREAM] Starting " << descriptor.name() << " at "
+		<< state.resolution.first << "x" << state.resolution.second
+		<< " @" << state.fps << "fps, bitrate=" << state.bitrate
+		<< "kbps, h265=" << (state.h265Enabled ? 1 : 0) << "\n";
 
 	// Keep the source selector in sync with the device that is streaming.
 	if (mainWindow->GetSourceChoice()->GetSelection() != deviceId + 1)

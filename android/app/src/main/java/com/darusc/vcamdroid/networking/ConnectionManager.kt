@@ -63,15 +63,17 @@ class ConnectionManager private constructor() : Connection.Listener {
      * The bytesReceivedListener is called only for packets of type different than PacketType.ACTIVATION.
      * These packets are handled internally
      */
-    fun setOnBytesReceivedCallback(onBytesReceivedCallback: (buffer: ByteArray, bytes: Int) -> Unit) {
+    fun setOnBytesReceivedCallback(onBytesReceivedCallback: ((buffer: ByteArray, bytes: Int) -> Unit)?) {
         this.onBytesReceivedCallback = onBytesReceivedCallback
         // Flush any bytes that arrived before the callback was registered (race
         // between the desktop's activation packet and StreamActivity creation).
-        synchronized(pendingLock) {
-            if (pendingBytes.size() > 0) {
-                val buffered = pendingBytes.toByteArray()
-                pendingBytes.reset()
-                onBytesReceivedCallback(buffered, buffered.size)
+        if (onBytesReceivedCallback != null) {
+            synchronized(pendingLock) {
+                if (pendingBytes.size() > 0) {
+                    val buffered = pendingBytes.toByteArray()
+                    pendingBytes.reset()
+                    onBytesReceivedCallback(buffered, buffered.size)
+                }
             }
         }
     }

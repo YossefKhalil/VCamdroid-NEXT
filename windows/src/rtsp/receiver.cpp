@@ -153,12 +153,20 @@ namespace RTSP
 
 	void Receiver::WorkerFunc()
 	{
+		int retries = 0;
 		while (isRunning)
 		{
 			Loop(0, 0);
 
 			if (isRunning)
 			{
+				++retries;
+				// Re-send the activation packet once every ~2 seconds. It can
+				// arrive before the phone's StreamActivity has registered its
+				// byte handler, in which case the phone never starts RTSP.
+				if (onRetryCallback && retries % 4 == 1)
+					onRetryCallback();
+
 				logger << "[RTSP] Connection lost (Resolution change?). Retrying in 500ms...\n";
 				std::this_thread::sleep_for(std::chrono::milliseconds(500));
 			}

@@ -72,6 +72,9 @@ struct DeviceDescriptor
 		return availableFilters;
 	}
 
+	int connectionId() const { return connection; }
+	void SetConnectionId(int id) { connection = id; }
+
 	bool operator==(const DeviceDescriptor& other) const
 	{
 		return this->rtspUrl == other.rtspUrl && this->deviceName == other.deviceName;
@@ -84,4 +87,5 @@ private:
 	std::vector<Resolution> availableFrontResolutions;
 	std::vector<Resolution> availableBackResolutions;
 	Video::Filter::Registry availableFilters;
+	int connection = -1;
 };

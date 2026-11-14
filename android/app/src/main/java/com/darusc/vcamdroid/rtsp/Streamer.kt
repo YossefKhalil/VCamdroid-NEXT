@@ -313,11 +313,11 @@ class Streamer(
                 rtspServerCamera2.startStream(URL)
                 Logger.log("STREAMER", "Stream started")
             } catch (e: Exception) {
-                Logger.log("STREAMER", "Error preparing stream")
+                Logger.log("STREAMER", "Error preparing stream: ${e.message}")
                 connectionManager.sendErrorReport(ErrorReport(
                     ErrorReport.Severity.ERROR,
                     "Can't start stream",
-                    "({${options.width}, ${options.height}) @${options.fps}fps not supported"
+                    "${options.width}x${options.height} @${options.fps}fps: ${e.message}"
                 ))
             }
         }

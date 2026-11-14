@@ -37,9 +37,9 @@ data class StreamOptions(
             buffer.get()
 
             // 1. Fixed Fields
-            val fps = buffer.getInt()
-            val width = buffer.getInt()
-            val height = buffer.getInt()
+            val fps = buffer.getInt().coerceIn(1, 120)
+            val width = buffer.getInt().coerceIn(2, 7680)
+            val height = buffer.getInt().coerceIn(2, 4320)
 
             val camera = if (buffer.getInt() == 1) CameraHelper.Facing.BACK else CameraHelper.Facing.FRONT
             // The Windows client serializes booleans as 32-bit integers (see
@@ -49,9 +49,9 @@ data class StreamOptions(
 
             // The Windows client stores and sends bitrates in kbps, while
             // RootEncoder expects bits per second.
-            val bitrate = buffer.getInt() * 1024
-            val minBitrate = buffer.getInt() * 1024
-            val maxBitrate = buffer.getInt() * 1024
+            val bitrate = (buffer.getInt() * 1024).coerceIn(500 * 1024, 50_000 * 1024)
+            val minBitrate = (buffer.getInt() * 1024).coerceIn(500 * 1024, 50_000 * 1024)
+            val maxBitrate = (buffer.getInt() * 1024).coerceIn(500 * 1024, 50_000 * 1024)
 
             val stabilization = buffer.getInt() == 1
             // Flash is applied through a separate PacketType.FLASH packet.

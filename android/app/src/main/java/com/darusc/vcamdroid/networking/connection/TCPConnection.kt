@@ -34,7 +34,8 @@ class TCPConnection(
 
     init {
         try {
-            socket = Socket(ipAddress, port)
+            socket = Socket()
+            socket.connect(java.net.InetSocketAddress(ipAddress, port), 5000)
 
             outputStream = socket.getOutputStream()
             inputStream = socket.getInputStream()
@@ -60,13 +61,15 @@ class TCPConnection(
         val buf = ByteArray(512)
         while (running.get()) {
             try {
-                val bytes = inputStream?.read(buf)
-                // When connected over ADB stream end of file might be reached
-                if(isOverAdb && bytes == -1) {
+                val bytes = inputStream?.read(buf) ?: -1
+                if (bytes <= 0) {
+                    // EOF (or no data) means the desktop closed the control
+                    // connection. Treat it as a disconnect on Wi-Fi too, not
+                    // only over ADB.
                     listener.onDisconnected()
                     break
                 }
-                listener.onBytesReceived(buf, bytes ?: 0)
+                listener.onBytesReceived(buf, bytes)
             } catch (e: Exception) {
                 Logger.log("TCPConnection", "Error while reading. Closing socket. ${e.message}")
                 listener.onDisconnected()
