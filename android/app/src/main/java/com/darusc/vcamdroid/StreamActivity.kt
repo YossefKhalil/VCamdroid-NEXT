@@ -67,6 +67,7 @@ class StreamActivity : AppCompatActivity(), SurfaceHolder.Callback, ConnectionMa
         if (holder.surface != null && holder.surface.isValid) {
             streamer.startPreview()
             pendingActivation?.let {
+                Toast.makeText(this, "Surface ready, starting stream", Toast.LENGTH_SHORT).show()
                 pendingActivation = null
                 streamer.startStream(it)
             }
@@ -124,6 +125,7 @@ class StreamActivity : AppCompatActivity(), SurfaceHolder.Callback, ConnectionMa
 
         when (type) {
             PacketType.ACTIVATION -> {
+                Toast.makeText(this, "Activation received, starting stream", Toast.LENGTH_SHORT).show()
                 val options = StreamOptions.deserialize(buffer)
                 if (viewBinding.surfaceView.holder.surface?.isValid == true) {
                     streamer.startStream(options)

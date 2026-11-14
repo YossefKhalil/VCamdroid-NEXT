@@ -6,6 +6,7 @@ import android.os.Looper
 import android.util.Log
 import android.view.Display
 import android.view.ViewOverlay
+import android.widget.Toast
 import com.darusc.vcamdroid.networking.ConnectionManager
 import com.darusc.vcamdroid.networking.DeviceDescriptor
 import com.darusc.vcamdroid.networking.ErrorReport
@@ -30,7 +31,7 @@ import java.util.logging.Filter
 
 class Streamer(
     private var options: StreamOptions,
-    context: Context,
+    private val context: Context,
     openGlView: OpenGlView,
 ) : ConnectChecker {
 
@@ -312,8 +313,14 @@ class Streamer(
                 )
                 rtspServerCamera2.startStream(URL)
                 Logger.log("STREAMER", "Stream started")
+                Handler(Looper.getMainLooper()).post {
+                    Toast.makeText(context, "RTSP stream started on $URL", Toast.LENGTH_LONG).show()
+                }
             } catch (e: Exception) {
                 Logger.log("STREAMER", "Error preparing stream: ${e.message}")
+                Handler(Looper.getMainLooper()).post {
+                    Toast.makeText(context, "Stream start failed: ${e.message}", Toast.LENGTH_LONG).show()
+                }
                 connectionManager.sendErrorReport(ErrorReport(
                     ErrorReport.Severity.ERROR,
                     "Can't start stream",

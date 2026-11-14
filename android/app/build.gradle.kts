@@ -11,8 +11,8 @@ android {
         applicationId = "com.darusc.vcamdroid"
         minSdk = 28
         targetSdk = 35
-        versionCode = 200
-        versionName = "2.0.0-NEXT"
+        versionCode = 201
+        versionName = "2.0.1-NEXT"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
