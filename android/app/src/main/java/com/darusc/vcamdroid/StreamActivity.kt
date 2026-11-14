@@ -1,9 +1,12 @@
 package com.darusc.vcamdroid
 
 import android.content.Intent
+import android.graphics.Color
 import android.os.Bundle
 import android.view.SurfaceHolder
+import android.view.ViewGroup
 import android.view.WindowManager
+import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import com.darusc.vcamdroid.databinding.ActivityStreamBinding
@@ -37,6 +40,14 @@ class StreamActivity : AppCompatActivity(), SurfaceHolder.Callback, ConnectionMa
     // and start the stream from surfaceCreated instead of racing the EGL setup.
     private var pendingActivation: StreamOptions? = null
 
+    private lateinit var statusView: TextView
+
+    private fun setStatus(text: String) {
+        runOnUiThread {
+            if (::statusView.isInitialized) statusView.text = text
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -47,9 +58,23 @@ class StreamActivity : AppCompatActivity(), SurfaceHolder.Callback, ConnectionMa
 
         setContentView(viewBinding.root)
 
+        // On-screen state indicator so connection/activation problems are
+        // visible on the phone without pulling a log file.
+        statusView = TextView(this).apply {
+            setTextColor(Color.WHITE)
+            setBackgroundColor(Color.argb(170, 0, 0, 0))
+            textSize = 13f
+            setPadding(32, 24, 32, 24)
+            text = "Waiting for activation..."
+        }
+        viewBinding.root.addView(statusView, ViewGroup.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT))
+
         // Create the streamer before registering the byte callback: the
         // callback may fire immediately with a buffered ACTIVATION packet.
         streamer = Streamer(StreamOptions(), this, viewBinding.surfaceView)
+        streamer.statusCallback = { setStatus(it) }
         connectionManager.setOnBytesReceivedCallback(::onBytesReceived)
 
         // Register after the streamer exists. If the surface is already
@@ -65,9 +90,10 @@ class StreamActivity : AppCompatActivity(), SurfaceHolder.Callback, ConnectionMa
 
     override fun surfaceCreated(holder: SurfaceHolder) {
         if (holder.surface != null && holder.surface.isValid) {
+            setStatus("Surface ready")
             streamer.startPreview()
             pendingActivation?.let {
-                Toast.makeText(this, "Surface ready, starting stream", Toast.LENGTH_SHORT).show()
+                setStatus("Starting pending stream...")
                 pendingActivation = null
                 streamer.startStream(it)
             }
@@ -97,6 +123,7 @@ class StreamActivity : AppCompatActivity(), SurfaceHolder.Callback, ConnectionMa
     private fun onBytesReceived(buffer: ByteArray, bytes: Int) {
         if (bytes <= 0) return
         receiveAccumulator.write(buffer, 0, bytes)
+        setStatus("RX $bytes B (total ${receiveAccumulator.size()} B)")
 
         var pending = receiveAccumulator.toByteArray()
         while (pending.isNotEmpty()) {
@@ -122,10 +149,11 @@ class StreamActivity : AppCompatActivity(), SurfaceHolder.Callback, ConnectionMa
     private fun handlePacket(buffer: ByteArray) {
         // Packet type is always the first byte
         val type = buffer[0]
+        setStatus("Packet type 0x${type.toString(16)} (${buffer.size} B)")
 
         when (type) {
             PacketType.ACTIVATION -> {
-                Toast.makeText(this, "Activation received, starting stream", Toast.LENGTH_SHORT).show()
+                setStatus("Activation received, starting stream...")
                 val options = StreamOptions.deserialize(buffer)
                 if (viewBinding.surfaceView.holder.surface?.isValid == true) {
                     streamer.startStream(options)

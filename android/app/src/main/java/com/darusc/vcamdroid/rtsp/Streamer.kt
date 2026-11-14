@@ -6,7 +6,6 @@ import android.os.Looper
 import android.util.Log
 import android.view.Display
 import android.view.ViewOverlay
-import android.widget.Toast
 import com.darusc.vcamdroid.networking.ConnectionManager
 import com.darusc.vcamdroid.networking.DeviceDescriptor
 import com.darusc.vcamdroid.networking.ErrorReport
@@ -44,6 +43,8 @@ class Streamer(
 
     private val rtspServerCamera2 = RtspServerCamera2(openGlView, this, PORT)
     private val connectionManager = ConnectionManager.getInstance()
+
+    var statusCallback: ((String) -> Unit)? = null
 
     private var bitrateAdapter = BitrateAdapter {
         if (options.adaptiveBitrateEnabled) {
@@ -313,14 +314,10 @@ class Streamer(
                 )
                 rtspServerCamera2.startStream(URL)
                 Logger.log("STREAMER", "Stream started")
-                Handler(Looper.getMainLooper()).post {
-                    Toast.makeText(context, "RTSP stream started on $URL", Toast.LENGTH_LONG).show()
-                }
+                statusCallback?.invoke("RTSP started, waiting for encoder...")
             } catch (e: Exception) {
                 Logger.log("STREAMER", "Error preparing stream: ${e.message}")
-                Handler(Looper.getMainLooper()).post {
-                    Toast.makeText(context, "Stream start failed: ${e.message}", Toast.LENGTH_LONG).show()
-                }
+                statusCallback?.invoke("Stream start failed: ${e.message}")
                 connectionManager.sendErrorReport(ErrorReport(
                     ErrorReport.Severity.ERROR,
                     "Can't start stream",
@@ -389,11 +386,17 @@ class Streamer(
 
     override fun onAuthSuccess() {}
 
-    override fun onConnectionFailed(reason: String) {}
+    override fun onConnectionFailed(reason: String) {
+        statusCallback?.invoke("RTSP failed: $reason")
+    }
 
-    override fun onConnectionStarted(url: String) {}
+    override fun onConnectionStarted(url: String) {
+        statusCallback?.invoke("RTSP server listening: $url")
+    }
 
-    override fun onConnectionSuccess() {}
+    override fun onConnectionSuccess() {
+        statusCallback?.invoke("RTSP client connected")
+    }
 
     override fun onDisconnect() {}
 }
