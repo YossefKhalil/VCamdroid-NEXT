@@ -157,6 +157,18 @@ class Streamer(
         }
 
         val existingFilter = options.activeCorrectionFilters.find { it::class.java == fclass }
+        if (value == 50) {
+            // Neutral slider position: remove the filter entirely instead of
+            // running pixels through a shader that is not actually neutral.
+            if (existingFilter != null) {
+                CoroutineScope(Dispatchers.Main).launch {
+                    rtspServerCamera2.glInterface.removeFilter(existingFilter)
+                    options.activeCorrectionFilters.remove(existingFilter)
+                }
+            }
+            return
+        }
+
         if (existingFilter != null) {
             // If the filter already exist just update its adjustment value
             FilterAdjuster.adjust(existingFilter, value)

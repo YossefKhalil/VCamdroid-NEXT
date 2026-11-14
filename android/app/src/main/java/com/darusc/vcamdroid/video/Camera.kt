@@ -40,6 +40,7 @@ class Camera(
     private val TAG = "VCamdroid"
 
     private val cameraExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+    private var cameraProvider: ProcessCameraProvider? = null
     private lateinit var resolution: Size
 
     private fun buildResolutionSelector(resolution: Size) =
@@ -76,7 +77,8 @@ class Camera(
         cameraProviderFuture.addListener({
 
             val resolutionSelector = buildResolutionSelector(resolution)
-            val cameraProvider = cameraProviderFuture.get()
+            val provider = cameraProviderFuture.get()
+            cameraProvider = provider
 
             val preview = buildPreview(resolutionSelector, surface)
             val imageAnalyzer = buildAnalyzer(resolutionSelector) { image ->
@@ -84,13 +86,21 @@ class Camera(
             }
 
             try {
-                cameraProvider.unbindAll()
-                cameraProvider.bindToLifecycle(lifecycleOwner, cameraSelector, preview, imageAnalyzer)
+                provider.unbindAll()
+                provider.bindToLifecycle(lifecycleOwner, cameraSelector, preview, imageAnalyzer)
             } catch (e: Exception) {
                 Logger.log("CAMERA", "Use case binding failed " + e.message)
             }
 
         }, ContextCompat.getMainExecutor(context));
+    }
+
+    /**
+     * Releases the CameraX use cases so another camera session (the RTSP
+     * streamer) can open the camera.
+     */
+    fun stop() {
+        cameraProvider?.unbindAll()
     }
 
     /**

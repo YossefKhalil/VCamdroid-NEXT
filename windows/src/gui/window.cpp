@@ -1,45 +1,83 @@
 #include "gui/window.h"
+#include "gui/settingspanel.h"
+#include "gui/devicespanel.h"
 #include "settings.h"
 #include "icon.xpm"
 
-#include <wx/dc.h>
-#include <wx/settings.h>
 #include <wx/statline.h>
+#include <wx/simplebook.h>
+#include <wx/stdpaths.h>
+#include <wx/filename.h>
+#include <cstring>
+
+#include "qrcodegen.hpp"
+
+namespace
+{
+	// QR code with the quiet zone required by the specification, rendered with
+	// nearest-neighbour scaling so the modules stay crisp.
+	wxBitmap MakeQrBitmap(const wxString& data, int displaySize)
+	{
+		const qrcodegen::QrCode qrcode = qrcodegen::QrCode::encodeText(
+			data.utf8_str().data(), qrcodegen::QrCode::Ecc::MEDIUM);
+		const int size = qrcode.getSize();
+		const int border = 8;
+		const int total = size + border * 2;
+
+		wxImage image(total, total);
+		unsigned char* bytes = image.GetData();
+		std::memset(bytes, 255, static_cast<size_t>(total) * total * 3);
+
+		for (int y = 0; y < size; y++)
+		{
+			for (int x = 0; x < size; x++)
+			{
+				if (qrcode.getModule(x, y))
+				{
+					unsigned char* pixel = bytes + (static_cast<size_t>(y + border) * total + (x + border)) * 3;
+					pixel[0] = 0;
+					pixel[1] = 0;
+					pixel[2] = 0;
+				}
+			}
+		}
+
+		return wxBitmap(image.Scale(wxSize(displaySize, displaySize), wxIMAGE_QUALITY_NEAREST));
+	}
+}
 
 Window::Window(Server::HostInfo hostinfo)
-	: wxFrame(nullptr, wxID_ANY, "VCamdroid", wxDefaultPosition, wxSize(500, 480), wxDEFAULT_FRAME_STYLE & ~wxMAXIMIZE_BOX & ~wxRESIZE_BORDER)
+	: wxFrame(nullptr, wxID_ANY, "VCamdroid NEXT", wxDefaultPosition, wxSize(880, 680), wxDEFAULT_FRAME_STYLE)
 {
-	wxPanel* panel = nullptr;
-	try {
-		panel = new wxPanel(this, wxID_ANY);
-	}
-	catch (...) {
-		wxMessageBox("Failed to create UI Panel.", "Error");
-		return;
-	}
+	SetBackgroundColour(Material::Colors().background);
+	SetMinSize(FromDIP(wxSize(720, 560)));
 
-	if (wxSystemSettings::GetAppearance().IsDark())
-	{
-		panel->SetBackgroundColour(wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOW));
-	}
+	wxFileName exeFile(wxStandardPaths::Get().GetExecutablePath());
+	appDir = exeFile.GetPath();
 
-	wxBoxSizer* topsizer = new wxBoxSizer(wxVERTICAL);
+	appIcon = wxIcon(icon);
+	wxIcon fileIcon;
+	const wxString iconPath = appDir + wxFILE_SEP_PATH + "res" + wxFILE_SEP_PATH + "vcamdroid.ico";
+	if (fileIcon.LoadFile(iconPath, wxBITMAP_TYPE_ICO))
+		appIcon = fileIcon;
 
 	taskbarIcon = new wxTaskBarIcon();
-	taskbarIcon->SetIcon(icon, "VCamdroid");
+	taskbarIcon->SetIcon(appIcon, "VCamdroid NEXT");
 	taskbarIcon->Bind(wxEVT_TASKBAR_LEFT_DCLICK, &Window::MaximizeFromTaskbar, this);
 	Bind(wxEVT_ICONIZE, &Window::MinimizeToTaskbar, this);
 
-	SetIcon(icon);
-	InitializeMenu(hostinfo);
+	SetIcon(appIcon);
 
-	InitializeTopBar(panel, topsizer);
-	InitializeCanvasPanel(panel, topsizer);
-	InitializeBottomBar(panel, topsizer);
+	auto root = new wxPanel(this, wxID_ANY);
+	root->SetBackgroundColour(Material::Colors().background);
 
-	panel->SetSizer(topsizer);
-	panel->Layout();
+	auto topsizer = new wxBoxSizer(wxVERTICAL);
+	InitializeHeader(root, topsizer);
+	InitializeSourceBar(root, topsizer);
+	InitializeContent(root, topsizer, hostinfo);
+	InitializeToolbar(root, topsizer);
 
+	root->SetSizer(topsizer);
 	Center();
 }
 
@@ -48,178 +86,344 @@ Window::~Window()
 	delete taskbarIcon;
 }
 
-void Window::InitializeMenu(Server::HostInfo hostinfo)
+void Window::InitializeHeader(wxPanel* parent, wxBoxSizer* topsizer)
 {
-	wxMenuBar* menuBar = new wxMenuBar();
+	auto header = new wxPanel(parent, wxID_ANY);
+	header->SetBackgroundColour(Material::Colors().background);
 
-	wxMenu* file = new wxMenu();
+	auto row = new wxBoxSizer(wxHORIZONTAL);
 
-	auto c1 = file->AppendCheckItem(MenuIDs::HIDE2TRAY, "Hide to tray");
-	c1->Check(Settings::Get("MINIMIZE_TASKBAR") == 1);
+	backButton = new Material::IconButton(header, Material::Icon::ArrowBack, "Back");
+	backButton->SetBackdrop(header->GetBackgroundColour());
+	backButton->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { GoBack(); });
+	backButton->Hide();
+	row->Add(backButton, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, FromDIP(4));
 
-	auto c2 = file->AppendCheckItem(MenuIDs::SHOWSTATS, "Show frame stats");
-	c2->Check(Settings::Get("SHOW_STATS") == 1);
+	wxBitmap logoBitmap;
+	wxImage logoImage;
+	const wxString logoPath = appDir + wxFILE_SEP_PATH + "res" + wxFILE_SEP_PATH + "logo.png";
+	if (logoImage.LoadFile(logoPath, wxBITMAP_TYPE_PNG) && logoImage.IsOk())
+	{
+		logoBitmap = wxBitmap(logoImage.Scale(FromDIP(36), FromDIP(36), wxIMAGE_QUALITY_HIGH));
+	}
+	else
+	{
+		logoBitmap = wxBitmap(icon);
+		if (logoBitmap.IsOk())
+			wxBitmap::Rescale(logoBitmap, wxSize(FromDIP(36), FromDIP(36)));
+	}
+	auto logo = new wxStaticBitmap(header, wxID_ANY, logoBitmap);
+	row->Add(logo, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, FromDIP(12));
 
-	auto c3 = file->AppendCheckItem(MenuIDs::SAVESTATE, "Save device presets");
-	c3->Check(Settings::Get("SAVE_DEVICE_STATE") == 1);
+	titleLabel = Material::Label(header, "VCamdroid NEXT", Material::TypeRole::TitleLarge);
+	row->Add(titleLabel, 0, wxALIGN_CENTER_VERTICAL);
 
-	wxMenu* dsresolutions = new wxMenu();
-	dsresolutions->AppendRadioItem(MenuIDs::DS_SD, "640 x 480", "Standard 4:3");
-	dsresolutions->AppendRadioItem(MenuIDs::DS_HD, "1280 x 720", "HD");
-	dsresolutions->AppendRadioItem(MenuIDs::DS_FHD, "1920 x 1080", "FHD");
-	dsresolutions->AppendRadioItem(MenuIDs::DS_QHD, "3840 x 2160", "QHD");
+	row->AddStretchSpacer(1);
 
-	auto selected = Settings::Get("DIRECTSHOW_RESOLUTION");
-	dsresolutions->Check((selected != -1 ? selected : 0) + 105, true);
+	statusChip = new Material::Chip(header, "Waiting", Material::Colors().outline, false);
+	statusChip->SetTonal(Material::Colors().surfaceContainerHigh,
+		Material::Colors().onSurfaceVariant, Material::Colors().outline);
+	statusChip->SetBackgroundColour(header->GetBackgroundColour());
+	row->Add(statusChip, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, FromDIP(10));
 
-	file->AppendSubMenu(dsresolutions, "DirectShow Resolution", "Requires restart");
+	qrButton = new Material::IconButton(header, Material::Icon::QrCode, "Show QR code");
+	qrButton->SetBackdrop(header->GetBackgroundColour());
+	qrButton->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { ShowQrPage(); });
+	row->Add(qrButton, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, FromDIP(4));
 
-	file->Append(wxID_ANY, "About");
-	file->AppendSeparator();
-	file->Append(wxID_ANY, "Exit");
-	menuBar->Append(file, "File");
+	menuButton = new Material::IconButton(header, Material::Icon::MoreVert, "Menu");
+	menuButton->SetBackdrop(header->GetBackgroundColour());
+	menuButton->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { ShowMainMenu(); });
+	row->Add(menuButton, 0, wxALIGN_CENTER_VERTICAL);
 
-	wxMenu* connect = new wxMenu();
-	connect->Append(MenuIDs::QR, "QR Code");
-	connect->AppendSeparator();
-	connect->Append(wxID_ANY, "IP:\t" + std::get<1>(hostinfo));
-	connect->Append(wxID_ANY, "Port:\t" + std::get<2>(hostinfo));
-	menuBar->Append(connect, "Connect");
-
-	wxMenu* devices = new wxMenu();
-	devices->Append(MenuIDs::DEVICES, "See connected devices");
-	menuBar->Append(devices, "Devices");
-
-	SetMenuBar(menuBar);
+	header->SetSizer(row);
+	topsizer->Add(header, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, FromDIP(20));
 }
 
-void Window::InitializeTopBar(wxPanel* parent, wxBoxSizer* topsizer)
+void Window::InitializeSourceBar(wxPanel* parent, wxBoxSizer* topsizer)
 {
-	wxBoxSizer* topBarSizer = new wxBoxSizer(wxHORIZONTAL);
+	auto card = new Material::Card(parent, 12, Material::Shape::Medium);
+	card->SetBackdrop(Material::Colors().background);
+	sourceCard = card;
 
-	wxStaticText* srcLabel = new wxStaticText(parent, wxID_ANY, "Source:");
-	wxFont font = srcLabel->GetFont();
-	font.SetWeight(wxFONTWEIGHT_BOLD);
-	srcLabel->SetFont(font);
-	topBarSizer->Add(srcLabel, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 8);
+	auto row = new wxBoxSizer(wxHORIZONTAL);
 
-	sourceChoice = new wxChoice(parent, wxID_ANY, wxDefaultPosition, wxSize(150, -1), 1, new wxString[1]{ "No devices" });	
-	topBarSizer->Add(sourceChoice, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 8);
+	sourceChoice = new Material::Select(card, "No devices");
+	sourceChoice->Append("No devices");
+	sourceChoice->SetSelection(0);
+	sourceChoice->SetMinSize(wxSize(FromDIP(280), FromDIP(40)));
+	row->Add(sourceChoice, 0, wxALIGN_CENTER_VERTICAL);
 
-	// Pushes everything after this to the right
-	topBarSizer->AddStretchSpacer(1);
+	row->AddStretchSpacer(1);
 
-	wxBoxSizer* sizer = new wxBoxSizer(wxHORIZONTAL);
-
-	statsText = new wxStaticText(parent, wxID_ANY, "----p@--fps\n00.0mbps", wxDefaultPosition, wxDefaultSize, wxALIGN_RIGHT);
-
-	// Slightly smaller font looks better for data display
-	wxFont statsFont = statsText->GetFont();
-	statsFont.SetPointSize(statsFont.GetPointSize() - 1);
-	statsText->SetFont(statsFont);
-
+	statsText = new wxStaticText(card, wxID_ANY, "----p @ -- fps\n0.0 Mbps",
+		wxDefaultPosition, wxDefaultSize, wxALIGN_RIGHT);
+	statsText->SetFont(Material::Font(Material::TypeRole::BodySmall));
+	statsText->SetForegroundColour(Material::Colors().onSurfaceVariant);
+	statsText->SetBackgroundColour(card->GetBackgroundColour());
 	statsText->Show(Settings::Get("SHOW_STATS") == 1);
+	row->Add(statsText, 0, wxALIGN_CENTER_VERTICAL);
 
-	// Add with some right padding to separate from the settings button
-	sizer->Add(statsText, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 10);
-
-	// Settings Button
-	streamOptionsButton = new wxBitmapButton(parent, wxID_ANY, wxBitmap("res/setting.png", wxBITMAP_TYPE_PNG));
-	streamOptionsButton->SetToolTip("Stream Settings");
-	sizer->Add(streamOptionsButton, 0, wxALIGN_CENTER_VERTICAL);
-
-	topBarSizer->Add(sizer, 0, wxALIGN_CENTER_VERTICAL);
-
-	topsizer->Add(topBarSizer, 0, wxEXPAND | wxALL, 10);
+	card->Content()->Add(row, 1, wxEXPAND);
+	topsizer->Add(card, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, FromDIP(20));
 }
 
-void Window::InitializeCanvasPanel(wxPanel* parent, wxBoxSizer* topsizer)
+void Window::InitializeContent(wxPanel* parent, wxBoxSizer* topsizer, Server::HostInfo hostinfo)
 {
-	// Just the Canvas now
-	canvas = new Canvas(parent, wxDefaultPosition, wxSize(400, 300));
-	topsizer->Add(canvas, 0, wxALIGN_CENTER_HORIZONTAL | wxLEFT | wxRIGHT | wxBOTTOM, 10);
+	book = new wxSimplebook(parent, wxID_ANY);
+	book->SetBackgroundColour(Material::Colors().background);
+
+	// Page 0: the QR code is always ready to scan, so connecting does not
+	// require opening a dialog first.
+	auto qrPage = new wxPanel(book, wxID_ANY);
+	qrPage->SetBackgroundColour(Material::Colors().background);
+	auto qrSizer = new wxBoxSizer(wxVERTICAL);
+
+	auto qrCard = new Material::Card(qrPage, 24, Material::Shape::Large, true);
+	qrCard->SetBackdrop(Material::Colors().background);
+	qrCard->SetFill(*wxWHITE);
+
+	const wxString payload = wxString::Format("%s:%s", std::get<1>(hostinfo), std::get<2>(hostinfo));
+	const int qrSize = FromDIP(260);
+	auto qrImage = new wxStaticBitmap(qrCard, wxID_ANY, MakeQrBitmap(payload, qrSize));
+	qrImage->SetBackgroundColour(*wxWHITE);
+	qrCard->Content()->Add(qrImage, 0, wxALIGN_CENTER_HORIZONTAL);
+
+	qrSizer->AddStretchSpacer(1);
+	qrSizer->Add(qrCard, 0, wxALIGN_CENTER_HORIZONTAL);
+	qrSizer->AddSpacer(FromDIP(12));
+	auto caption = Material::Label(qrPage, "Scan with the VCamdroid Android app",
+		Material::TypeRole::BodySmall, Material::Colors().onSurfaceVariant);
+	qrSizer->Add(caption, 0, wxALIGN_CENTER_HORIZONTAL);
+	qrSizer->AddStretchSpacer(1);
+	qrPage->SetSizer(qrSizer);
+
+	// Page 1: live preview.
+	auto videoPage = new wxPanel(book, wxID_ANY);
+	videoPage->SetBackgroundColour(Material::Colors().background);
+	auto videoSizer = new wxBoxSizer(wxVERTICAL);
+
+	auto videoCard = new Material::Card(videoPage, 8, Material::Shape::Large, true);
+	videoCard->SetBackdrop(Material::Colors().background);
+	videoCard->SetFill(Material::Colors().surfaceContainerHighest);
+
+	canvas = new Canvas(videoCard, wxDefaultPosition, wxSize(720, 405));
+	canvas->SetCornerRadius(Material::Radius(Material::Shape::Large));
+	canvas->SetMinSize(wxSize(FromDIP(480), FromDIP(270)));
+	canvas->SetPlaceholder("Starting camera", "");
+	videoCard->Content()->Add(canvas, 1, wxEXPAND);
+
+	videoSizer->Add(videoCard, 1, wxEXPAND);
+	videoPage->SetSizer(videoSizer);
+
+	// Page 2: settings (in-app page, no modal dialog).
+	settingsPage = new wxPanel(book, wxID_ANY);
+	settingsPage->SetBackgroundColour(Material::Colors().background);
+	auto settingsSizer = new wxBoxSizer(wxVERTICAL);
+
+	auto settingsScroll = new wxScrolledWindow(settingsPage, wxID_ANY);
+	settingsScroll->SetBackgroundColour(Material::Colors().background);
+	settingsScroll->SetScrollRate(0, FromDIP(12));
+	settingsPanel = new SettingsPanel(settingsScroll, [this]() {
+		if (settingsChanged)
+			settingsChanged();
+	});
+	auto scrollSizer = new wxBoxSizer(wxVERTICAL);
+	scrollSizer->Add(settingsPanel, 1, wxEXPAND);
+	settingsScroll->SetSizer(scrollSizer);
+	settingsScroll->FitInside();
+
+	settingsSizer->Add(settingsScroll, 1, wxEXPAND);
+	settingsPage->SetSizer(settingsSizer);
+
+	// Page 3: connected devices (in-app page, no modal dialog).
+	devicesPage = new wxPanel(book, wxID_ANY);
+	devicesPage->SetBackgroundColour(Material::Colors().background);
+	auto devicesSizer = new wxBoxSizer(wxVERTICAL);
+	devicesPanel = new DevicesPanel(devicesPage);
+	devicesSizer->Add(devicesPanel, 1, wxEXPAND);
+	devicesPage->SetSizer(devicesSizer);
+
+	book->AddPage(qrPage, "QR");
+	book->AddPage(videoPage, "Preview");
+	book->AddPage(settingsPage, "Settings");
+	book->AddPage(devicesPage, "Devices");
+	book->SetSelection(0);
+
+	topsizer->Add(book, 1, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, FromDIP(20));
 }
 
-void Window::InitializeBottomBar(wxPanel* parent, wxBoxSizer* topsizer)
+void Window::InitializeToolbar(wxPanel* parent, wxBoxSizer* topsizer)
 {
-	wxStaticLine* line = new wxStaticLine(parent, wxID_ANY, wxDefaultPosition, wxSize(1, 1), wxLI_HORIZONTAL);
-	topsizer->Add(line, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
+	auto toolbar = new Material::Card(parent, 8, Material::Shape::Large);
+	toolbar->SetBackdrop(Material::Colors().background);
+	toolbarCard = toolbar;
 
-	wxBoxSizer* bottomBarSizer = new wxBoxSizer(wxHORIZONTAL);
+	auto row = new wxBoxSizer(wxHORIZONTAL);
 
-	// --- GROUP 1: TRANSFORMS ---
-	wxBoxSizer* groupTransform = new wxBoxSizer(wxHORIZONTAL);
+	auto addIcon = [&](Material::Icon icon, const wxString& tip, Material::IconButton** out)
+	{
+		auto button = new Material::IconButton(toolbar, icon, tip);
+		button->SetBackdrop(toolbar->GetBackgroundColour());
+		row->Add(button, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, FromDIP(2));
+		if (out)
+			*out = button;
+	};
 
-	rotateLeftButton = new wxBitmapButton(parent, wxID_ANY, wxBitmap("res/rotate-left.png", wxBITMAP_TYPE_PNG));
-	rotateLeftButton->SetToolTip("Rotate Left");
-	groupTransform->Add(rotateLeftButton, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 2);
+	auto addSeparator = [&]()
+	{
+		auto separator = new wxPanel(toolbar, wxID_ANY, wxDefaultPosition,
+			wxSize(FromDIP(1), FromDIP(26)));
+		separator->SetBackgroundColour(Material::Colors().outlineVariant);
+		row->Add(separator, 0, wxALIGN_CENTER_VERTICAL | wxLEFT | wxRIGHT, FromDIP(8));
+	};
 
-	rotateRightButton = new wxBitmapButton(parent, wxID_ANY, wxBitmap("res/rotate-right.png", wxBITMAP_TYPE_PNG));
-	rotateRightButton->SetToolTip("Rotate Right");
-	groupTransform->Add(rotateRightButton, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 2);
+	addIcon(Material::Icon::RotateLeft, "Rotate left", &rotateLeftButton);
+	addIcon(Material::Icon::RotateRight, "Rotate right", &rotateRightButton);
+	addIcon(Material::Icon::FlipHorizontal, "Flip horizontally", &flipButton);
+	addIcon(Material::Icon::FlipVertical, "Flip vertically", &flipVerticalButton);
 
-	flipButton = new wxBitmapButton(parent, wxID_ANY, wxBitmap("res/flip.png", wxBITMAP_TYPE_PNG));
-	flipButton->SetToolTip("Flip Horizontally");
-	groupTransform->Add(flipButton, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 2);
+	addSeparator();
 
-	flipVerticalButton = new wxBitmapButton(parent, wxID_ANY, wxBitmap("res/flip-v.png", wxBITMAP_TYPE_PNG));
-	flipVerticalButton->SetToolTip("Flip Vertically");
-	groupTransform->Add(flipVerticalButton, 0, wxALIGN_CENTER_VERTICAL);
+	addIcon(Material::Icon::ZoomOut, "Zoom out", &zoomOutButton);
 
-	bottomBarSizer->Add(groupTransform, 0, wxALIGN_CENTER_VERTICAL);
-	bottomBarSizer->AddStretchSpacer(1);
+	zoomLevelLabel = new Material::Chip(toolbar, "1.0x", wxNullColour, false);
+	row->Add(zoomLevelLabel, 0, wxALIGN_CENTER_VERTICAL | wxLEFT | wxRIGHT, FromDIP(6));
 
+	addIcon(Material::Icon::ZoomIn, "Zoom in", &zoomInButton);
 
-	// --- GROUP 2: ZOOM ---
-	wxBoxSizer* groupZoom = new wxBoxSizer(wxHORIZONTAL);
+	addSeparator();
 
-	zoomOutButton = new wxBitmapButton(parent, wxID_ANY, wxBitmap("res/zoom-out.png", wxBITMAP_TYPE_PNG));
-	zoomOutButton->SetToolTip("Zoom Out");
-	groupZoom->Add(zoomOutButton, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 4);
+	addIcon(Material::Icon::Flash, "Toggle flash", &torchButton);
+	addIcon(Material::Icon::SwapCamera, "Switch camera", &swapButton);
+	addIcon(Material::Icon::Snapshot, "Take snapshot", &snapshotButton);
 
-	zoomLevelLabel = new wxStaticText(parent, wxID_ANY, "1.0x", wxDefaultPosition, wxSize(32, -1), wxALIGN_CENTER);
-	wxFont smallFont = zoomLevelLabel->GetFont();
-	smallFont.SetPointSize(smallFont.GetPointSize() - 1);
-	zoomLevelLabel->SetFont(smallFont);
-	groupZoom->Add(zoomLevelLabel, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 4);
+	row->AddStretchSpacer(1);
 
-	zoomInButton = new wxBitmapButton(parent, wxID_ANY, wxBitmap("res/zoom-in.png", wxBITMAP_TYPE_PNG));
-	zoomInButton->SetToolTip("Zoom In");
-	groupZoom->Add(zoomInButton, 0, wxALIGN_CENTER_VERTICAL);
+	addIcon(Material::Icon::Adjustments, "Image adjustments", &adjustmentsButton);
+	addIcon(Material::Icon::Gear, "Stream settings", &streamOptionsButton);
 
-	bottomBarSizer->Add(groupZoom, 0, wxALIGN_CENTER_VERTICAL);
-	bottomBarSizer->AddStretchSpacer(1);
+	toolbar->Content()->Add(row, 1, wxEXPAND);
+	topsizer->Add(toolbar, 0, wxEXPAND | wxALL, FromDIP(20));
+}
 
+void Window::ShowMainMenu()
+{
+	using Material::MenuItem;
 
-	// --- GROUP 3: DEVICE ---
-	wxBoxSizer* groupDevice = new wxBoxSizer(wxHORIZONTAL);
+	std::vector<MenuItem> items;
+	items.push_back(MenuItem::Item(MenuIDs::DEVICES, "Connected devices"));
+	items.push_back(MenuItem::Item(MenuIDs::SETTINGS, "Settings"));
+	items.push_back(MenuItem::Separator());
+	items.push_back(MenuItem::Item(MenuIDs::ABOUT, "About"));
+	items.push_back(MenuItem::Item(MenuIDs::EXIT, "Exit"));
 
-	torchButton = new wxBitmapButton(parent, wxID_ANY, wxBitmap("res/flash.png", wxBITMAP_TYPE_PNG));
-	torchButton->SetToolTip("Toggle Flash");
-	groupDevice->Add(torchButton, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
+	const wxPoint anchor = menuButton ? menuButton->ClientToScreen(wxPoint(0, menuButton->GetSize().y)) : wxGetMousePosition();
+	auto* menu = new Material::MenuPopup(this, items, [this](int id, bool checked)
+	{
+		SendMenuEvent(id, checked);
+	});
+	const wxSize popupSize = menu->GetPopupSize();
+	const int popupX = menuButton ? (anchor.x + menuButton->GetSize().x - popupSize.x) : anchor.x;
+	menu->PopupAt(wxPoint(popupX, anchor.y));
+}
 
-	swapButton = new wxBitmapButton(parent, wxID_ANY, wxBitmap("res/swap.png", wxBITMAP_TYPE_PNG));
-	swapButton->SetToolTip("Switch Camera");
-	groupDevice->Add(swapButton, 0, wxALIGN_CENTER_VERTICAL);
+void Window::SendMenuEvent(int id, bool checked)
+{
+	wxCommandEvent event(wxEVT_MENU, id);
+	event.SetEventObject(this);
+	event.SetInt(checked ? 1 : 0);
+	GetEventHandler()->ProcessEvent(event);
+}
 
-	snapshotButton = new wxBitmapButton(parent, wxID_ANY, wxBitmap("res/photo.png", wxBITMAP_TYPE_PNG));
-	snapshotButton->SetToolTip("Take Snapshot");
-	groupDevice->Add(snapshotButton, 0, wxALIGN_CENTER_VERTICAL);
+void Window::SetStatus(const wxString& text, const wxColour& dotColor)
+{
+	if (!statusChip)
+		return;
+	statusChip->SetLabelText(text);
+	statusChip->SetTonal(Material::Colors().surfaceContainerHigh,
+		Material::Colors().onSurfaceVariant, dotColor);
+	statusChip->GetParent()->Layout();
+}
 
-	bottomBarSizer->Add(groupDevice, 0, wxALIGN_CENTER_VERTICAL);
-	bottomBarSizer->AddStretchSpacer(1);
+void Window::SetStreaming(bool live)
+{
+	SetStatus(live ? "Live" : "Waiting",
+		live ? Material::Colors().primary : Material::Colors().outline);
 
+	if (live && statusChip)
+		statusChip->SetTonal(Material::Colors().primaryContainer,
+			Material::Colors().onPrimaryContainer, Material::Colors().primary);
 
-	// --- GROUP 4: TOOLS ---
-	wxBoxSizer* groupTools = new wxBoxSizer(wxHORIZONTAL);
+	contentPage = live ? 1 : 0;
 
-	adjustmentsButton = new wxBitmapButton(parent, wxID_ANY, wxBitmap("res/settings.png", wxBITMAP_TYPE_PNG));
-	adjustmentsButton->SetToolTip("Image Adjustments");
-	groupTools->Add(adjustmentsButton, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 2);
+	// Only switch the content page when the user is on a content page, so the
+	// Settings/Devices pages are not yanked away during a stream change.
+	if (book && book->GetSelection() <= 1)
+		book->ChangeSelection(contentPage);
 
-	bottomBarSizer->Add(groupTools, 0, wxALIGN_CENTER_VERTICAL);
+	backButton->Hide();
+	qrButton->Show();
+	sourceCard->Show();
+	toolbarCard->Show();
+	titleLabel->SetLabel("VCamdroid NEXT");
+	backButton->GetParent()->Layout();
+	Layout();
+}
 
-	topsizer->Add(bottomBarSizer, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
+void Window::ShowQrPage()
+{
+	contentPage = 0;
+	if (book)
+		book->ChangeSelection(0);
+	backButton->Hide();
+	qrButton->Show();
+	sourceCard->Show();
+	toolbarCard->Show();
+	titleLabel->SetLabel("VCamdroid NEXT");
+	backButton->GetParent()->Layout();
+	Layout();
+}
+
+void Window::ShowSettingsPage()
+{
+	if (book)
+		book->ChangeSelection(2);
+	backButton->Show();
+	qrButton->Hide();
+	sourceCard->Hide();
+	toolbarCard->Hide();
+	titleLabel->SetLabel("Settings");
+	backButton->GetParent()->Layout();
+	Layout();
+}
+
+void Window::ShowDevicesPage(const std::vector<DeviceDescriptor>& devices)
+{
+	if (devicesPanel)
+		devicesPanel->SetDevices(devices);
+	if (book)
+		book->ChangeSelection(3);
+	backButton->Show();
+	qrButton->Hide();
+	sourceCard->Hide();
+	toolbarCard->Hide();
+	titleLabel->SetLabel("Connected devices");
+	backButton->GetParent()->Layout();
+	Layout();
+}
+
+void Window::GoBack()
+{
+	if (book)
+		book->ChangeSelection(contentPage);
+	backButton->Hide();
+	qrButton->Show();
+	sourceCard->Show();
+	toolbarCard->Show();
+	titleLabel->SetLabel("VCamdroid NEXT");
+	backButton->GetParent()->Layout();
+	Layout();
 }
 
 void Window::MinimizeToTaskbar(wxIconizeEvent& evt)
@@ -240,23 +444,23 @@ void Window::MaximizeFromTaskbar(wxTaskBarIconEvent& evt)
 }
 
 Canvas* Window::GetCanvas() { return canvas; }
-wxChoice* Window::GetSourceChoice() { return sourceChoice; }
-wxButton* Window::GetStreamOptionsButton() { return streamOptionsButton; }
+Material::Select* Window::GetSourceChoice() { return sourceChoice; }
+wxWindow* Window::GetStreamOptionsButton() { return streamOptionsButton; }
 
-wxButton* Window::GetRotateLeftButton() { return rotateLeftButton; }
-wxButton* Window::GetRotateRightButton() { return rotateRightButton; }
-wxButton* Window::GetFlipButton() { return flipButton; }
-wxButton* Window::GetFlipVerticalButton() { return flipVerticalButton; }
+wxWindow* Window::GetRotateLeftButton() { return rotateLeftButton; }
+wxWindow* Window::GetRotateRightButton() { return rotateRightButton; }
+wxWindow* Window::GetFlipButton() { return flipButton; }
+wxWindow* Window::GetFlipVerticalButton() { return flipVerticalButton; }
 
-wxButton* Window::GetZoomInButton() { return zoomInButton; }
-wxButton* Window::GetZoomOutButton() { return zoomOutButton; }
-wxStaticText* Window::GetZoomLevelLabel() { return zoomLevelLabel; }
+wxWindow* Window::GetZoomInButton() { return zoomInButton; }
+wxWindow* Window::GetZoomOutButton() { return zoomOutButton; }
+Material::Chip* Window::GetZoomLevelLabel() { return zoomLevelLabel; }
 
-wxButton* Window::GetTorchButton() { return torchButton; }
-wxButton* Window::GetSwapButton() { return swapButton; }
+wxWindow* Window::GetTorchButton() { return torchButton; }
+wxWindow* Window::GetSwapButton() { return swapButton; }
 
-wxButton* Window::GetAdjustmentsButton() { return adjustmentsButton; }
-wxButton* Window::GetSnapshotButton() { return snapshotButton; }
+wxWindow* Window::GetAdjustmentsButton() { return adjustmentsButton; }
+wxWindow* Window::GetSnapshotButton() { return snapshotButton; }
 
 wxStaticText* Window::GetStatsText() { return statsText; }
 wxTaskBarIcon* Window::GetTaskbarIcon() { return taskbarIcon; }

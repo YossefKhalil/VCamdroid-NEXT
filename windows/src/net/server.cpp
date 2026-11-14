@@ -1,5 +1,7 @@
 #include "net/server.h"
 
+#include <vector>
+
 #include "logger.h"
 #include "adb.h"
 #include "net/serializer.h"
@@ -42,7 +44,7 @@ Server::HostInfo Server::GetHostInfo()
 		udp::socket socket(context);
 
 		// This might throw if there is NO network adapter enabled
-		socket.connect(udp::endpoint(asio::ip::address::from_string("8.8.8.8"), 80));
+		socket.connect(udp::endpoint(asio::ip::make_address("8.8.8.8"), 80));
 		ip_str = socket.local_endpoint().address().to_string();
 		socket.close();
 	}
@@ -130,25 +132,76 @@ void Server::TCPDoAccept()
 		{
 			logger << "[SERVER] Device connected." << socket.remote_endpoint() << std::endl;
 
-			// Read the only message sent by the client (the device descriptor)
-			// We need to read this here because the connection listener
-			// needs all the data sent by the client (trough GetConnectedDevicesInfo)
-			// otherwise the connection would need to be passed to the connection
-			std::array<char, 512> buffer;
-			size_t size = socket.read_some(asio::buffer(buffer, 512));
-			
-			// auto ipaddress = socket.remote_endpoint().address().to_string();
-			auto descriptor = Serializer::DeserializeDeviceDescriptor((const uint8_t*)buffer.data(), size);
+			// Read the only message sent by the client (the device descriptor).
+			// The descriptor is variable-length, so read its fields exactly instead
+			// of assuming that one read_some() returns the whole message. A single
+			// read could also truncate descriptors larger than 512 bytes.
+			try
+			{
+				std::vector<uint8_t> buffer;
 
-			auto conn = std::make_shared<Connection>(
-				std::move(socket),
-				descriptor,
-				std::bind(&Server::OnConnectionDisconnected, this, std::placeholders::_1),
-				std::bind(&Server::OnConnectionReportingError, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3)
-			);
-			connections.push_back(std::move(conn));
+				auto appendUInt16 = [&buffer](uint16_t value) {
+					buffer.push_back(static_cast<uint8_t>((value >> 8) & 0xFF));
+					buffer.push_back(static_cast<uint8_t>(value & 0xFF));
+				};
+				auto readExact = [&socket](void* data, size_t size) {
+					asio::read(socket, asio::buffer(data, size));
+				};
+				auto readUInt16 = [&socket]() {
+					uint8_t bytes[2];
+					asio::read(socket, asio::buffer(bytes, sizeof(bytes)));
+					return static_cast<uint16_t>((bytes[0] << 8) | bytes[1]);
+				};
+				auto readString = [&]() {
+					uint16_t length = readUInt16();
+					appendUInt16(length);
+					size_t offset = buffer.size();
+					buffer.resize(offset + length);
+					if (length > 0) {
+						readExact(buffer.data() + offset, length);
+					}
+				};
+				auto readResolutions = [&]() {
+					uint16_t count = readUInt16();
+					appendUInt16(count);
+					size_t offset = buffer.size();
+					size_t bytes = static_cast<size_t>(count) * 4;
+					buffer.resize(offset + bytes);
+					if (bytes > 0) {
+						readExact(buffer.data() + offset, bytes);
+					}
+				};
 
-			connectionListener.OnDeviceConnected(descriptor);
+				readString();       // device name
+				readString();       // RTSP URL
+				readResolutions();  // front camera resolutions
+				readResolutions();  // back camera resolutions
+
+				uint16_t filterCount = readUInt16();
+				appendUInt16(filterCount);
+				for (uint16_t i = 0; i < filterCount; ++i) {
+					readString();   // filter name
+					uint8_t category = 0;
+					readExact(&category, 1);
+					buffer.push_back(category);
+				}
+
+				auto descriptor = Serializer::DeserializeDeviceDescriptor(buffer.data(), buffer.size());
+
+				auto conn = std::make_shared<Connection>(
+					std::move(socket),
+					descriptor,
+					std::bind(&Server::OnConnectionDisconnected, this, std::placeholders::_1),
+					std::bind(&Server::OnConnectionReportingError, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3)
+				);
+				connections.push_back(std::move(conn));
+
+				connectionListener.OnDeviceConnected(descriptor);
+			}
+			catch (const std::exception& e)
+			{
+				logger << "[SERVER] Failed to read device descriptor: " << e.what() << std::endl;
+			}
 		}
 		else if (ec != asio::error::operation_aborted)
 		{

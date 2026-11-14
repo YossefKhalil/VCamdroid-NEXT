@@ -2,21 +2,24 @@
 
 #include "gui/imgadjdlg.h"
 #include "gui/streamconfigdlg.h"
-#include "gui/devicesview.h"
 #include "gui/qrconview.h"
+#include "gui/theme.h"
 #include "settings.h"
 #include "video/guipreviewscaler.h"
 #include <iomanip>
 
 Application::Application()
 {
-	SetAppearance(Appearance::System);
 	wxInitAllImageHandlers();
 
 	SetAppName("VCamdroid");
 	
 	Settings::Load();
 	stateRegistry = Settings::GetDeviceStates();
+
+	// Apply the saved theme (0 = system, 1 = light, 2 = dark) so native
+	// controls follow the same scheme as the Material 3 surfaces.
+	SetAppearance(Material::IsDark() ? Appearance::Dark : Appearance::Light);
 }
 
 bool Application::OnInit()
@@ -35,7 +38,6 @@ bool Application::OnInit()
 
 	try {
 		server = std::make_unique<Server>(6969, *this);
-		server->Start();
 	}
 	catch (const std::exception& e) {
 		wxMessageBox(
@@ -62,6 +64,14 @@ bool Application::OnInit()
 				dsSource->SendRawFrame(frame);
 			}
 			snapshotManager.ProcessFrame(frame);
+
+			// First decoded frame after a connection: flip the status chip.
+			if (!streamLive.exchange(true) && mainWindow) {
+				mainWindow->GetEventHandler()->CallAfter([this]() {
+					if (mainWindow)
+						mainWindow->SetStreaming(true);
+				});
+			}
 		},
 		// OnStatsReceivedCallback
 		[&](const RTSP::Receiver::Stats& stats) {
@@ -84,7 +94,21 @@ bool Application::OnInit()
 	);
 
 	BindEventListeners();
+	appliedThemeMode = Settings::Get("THEME_MODE");
 	mainWindow->Show();
+
+	try {
+		server->Start();
+	}
+	catch (const std::exception& e) {
+		wxMessageBox(
+			wxString::Format("Critical Error: Could not start the network listener.\n\nReason: %s", e.what()),
+			"Initialization Failed",
+			wxOK | wxICON_ERROR | wxCENTRE,
+			mainWindow
+		);
+		return false;
+	}
 
 	return true;
 }
@@ -100,6 +124,7 @@ StreamOptions& Application::GetCurrentDeviceStreamOptions()
 
 void Application::BindEventListeners()
 {
+	mainWindow->SetSettingsChangedCallback([this]() { ApplySettings(); });
 	mainWindow->Bind(wxEVT_CLOSE_WINDOW, &Application::OnWindowCloseEvent, this);
 	mainWindow->Bind(wxEVT_MENU, &Application::OnMenuEvent, this);
 
@@ -162,36 +187,75 @@ void Application::BindEventListeners()
 
 void Application::OnDeviceConnected(DeviceDescriptor& descriptor) const
 {
-	mainWindow->GetTaskbarIcon()->ShowBalloon("New stream available", "Streaming device " + descriptor.name() + " available!", 10, wxICON_INFORMATION);
-	rtspManager->AddDescriptor(descriptor);
-	UpdateAvailableDevices();
+	// Connection callbacks run on the asio I/O thread. Touching wxWidgets from
+	// that thread is the root cause of the crash-on-connect reports, so marshal
+	// everything onto the main thread and capture the descriptor by value.
+	DeviceDescriptor copy = descriptor;
+	mainWindow->GetEventHandler()->CallAfter([this, copy]() mutable {
+		if (!mainWindow)
+			return;
+		mainWindow->GetTaskbarIcon()->ShowBalloon("New stream available",
+			"Streaming device " + copy.name() + " available!", 10, wxICON_INFORMATION);
+		rtspManager->AddDescriptor(copy);
+		UpdateAvailableDevices();
+		mainWindow->SetStatus(copy.name(), Material::Colors().primary);
+
+		// Auto-switch to a freshly connected device when nothing is streaming,
+		// so pairing a phone starts the video without an extra click.
+		if (rtspManager->GetStreamingDevice() < 0 && !rtspManager->GetDescriptors().empty())
+		{
+			const int newId = static_cast<int>(rtspManager->GetDescriptors().size()) - 1;
+			mainWindow->GetSourceChoice()->SetSelection(newId + 1);
+			wxCommandEvent evt(wxEVT_CHOICE, mainWindow->GetSourceChoice()->GetId());
+			evt.SetEventObject(mainWindow->GetSourceChoice());
+			mainWindow->GetEventHandler()->ProcessEvent(evt);
+		}
+	});
 }
 
 void Application::OnDeviceDisconnected(DeviceDescriptor& descriptor) const
 {
-	mainWindow->GetTaskbarIcon()->ShowBalloon("Stream ended", "Streaming device " + descriptor.name() + " disconnected!", 10, wxICON_INFORMATION);
-	
-	// Check if the device that just disconnected was the active streaming device
-	// If it was reset the canvas to blank
-	int streamingDeviceId = rtspManager->GetStreamingDevice();
-	if (streamingDeviceId >= 0)
-	{
-		const auto& streamingDescriptor = rtspManager->GetDescriptors()[streamingDeviceId];
-		if (streamingDescriptor == descriptor)
-			mainWindow->GetCanvas()->Clear();
-	}
+	DeviceDescriptor copy = descriptor;
+	mainWindow->GetEventHandler()->CallAfter([this, copy]() mutable {
+		if (!mainWindow)
+			return;
 
-	// Remove from manager
-	rtspManager->RemoveDescriptor(descriptor);
+		mainWindow->GetTaskbarIcon()->ShowBalloon("Stream ended",
+			"Streaming device " + copy.name() + " disconnected!", 10, wxICON_INFORMATION);
 
-	// Update UI list
-	UpdateAvailableDevices();
+		// Check if the device that just disconnected was the active streaming device
+		// If it was reset the canvas to blank
+		int streamingDeviceId = rtspManager->GetStreamingDevice();
+		if (streamingDeviceId >= 0 && streamingDeviceId < static_cast<int>(rtspManager->GetDescriptors().size()))
+		{
+			const auto& streamingDescriptor = rtspManager->GetDescriptors()[streamingDeviceId];
+			if (streamingDescriptor == copy)
+			{
+				mainWindow->GetCanvas()->Clear();
+				streamLive = false;
+				mainWindow->SetStreaming(false);
+			}
+		}
+
+		// Remove from manager
+		rtspManager->RemoveDescriptor(copy);
+
+		// Update UI list
+		UpdateAvailableDevices();
+		mainWindow->SetStatus("Waiting", Material::Colors().outline);
+	});
 }
 
 void Application::OnDeviceErrorReported(DeviceDescriptor& descriptor, const Connection::ErrorReport& error) const
 {
-	auto icon = error.severity == Connection::ErrorReport::SEVERITY_WARNING ? wxICON_WARNING : wxICON_ERROR;
-	mainWindow->GetTaskbarIcon()->ShowBalloon(descriptor.name() + " " + error.error, error.description, 1000, icon);
+	const std::string deviceName = descriptor.name();
+	Connection::ErrorReport copy = error;
+	mainWindow->GetEventHandler()->CallAfter([this, deviceName, copy]() {
+		if (!mainWindow)
+			return;
+		auto icon = copy.severity == Connection::ErrorReport::SEVERITY_WARNING ? wxICON_WARNING : wxICON_ERROR;
+		mainWindow->GetTaskbarIcon()->ShowBalloon(deviceName + " " + copy.error, copy.description, 1000, icon);
+	});
 }
 
 void Application::UpdateAvailableDevices() const
@@ -240,36 +304,76 @@ void Application::OnMenuEvent(wxCommandEvent& event)
 	{
 		case Window::MenuIDs::DEVICES:
 		{
-			DevicesView devlistview(mainWindow, rtspManager->GetDescriptors());
-			devlistview.ShowModal();
+			mainWindow->ShowDevicesPage(rtspManager->GetDescriptors());
 			break;
 		}
 
 		case Window::MenuIDs::QR:
+		case Window::MenuIDs::SHOW_QR:
 		{
-			auto info = server->GetHostInfo();
-			QrconView qrview(std::get<0>(info), std::get<1>(info), std::get<2>(info), wxSize(150, 150));
-			qrview.ShowModal();
+			mainWindow->ShowQrPage();
+			break;
+		}
+
+		case Window::MenuIDs::STREAM_SETTINGS:
+		{
+			ShowStreamConfigDialog(event);
+			break;
+		}
+
+		case Window::MenuIDs::SETTINGS:
+		{
+			mainWindow->ShowSettingsPage();
 			break;
 		}
 
 		case Window::MenuIDs::HIDE2TRAY:
 		{
-			Settings::Set("MINIMIZE_TASKBAR", event.IsChecked() ? 1 : 0);
+			Settings::Set("MINIMIZE_TASKBAR", event.GetInt() != 0 ? 1 : 0);
 			break;
 		}
 
 		case Window::MenuIDs::SHOWSTATS:
 		{
-			Settings::Set("SHOW_STATS", event.IsChecked() ? 1 : 0);
-			mainWindow->GetStatsText()->Show(event.IsChecked());
+			const bool show = event.GetInt() != 0;
+			Settings::Set("SHOW_STATS", show ? 1 : 0);
+			mainWindow->GetStatsText()->Show(show);
 			mainWindow->Layout(); // Refresh layout to hide/show properly
 			break;
 		}
 
 		case Window::MenuIDs::SAVESTATE:
 		{
-			Settings::Set("SAVE_DEVICE_STATES", event.IsChecked() ? 1 : 0);
+			Settings::Set("SAVE_DEVICE_STATES", event.GetInt() != 0 ? 1 : 0);
+			break;
+		}
+
+		case Window::MenuIDs::THEME_SYSTEM:
+			SetThemeMode(0);
+			break;
+
+		case Window::MenuIDs::THEME_LIGHT:
+			SetThemeMode(1);
+			break;
+
+		case Window::MenuIDs::THEME_DARK:
+			SetThemeMode(2);
+			break;
+
+		case Window::MenuIDs::ABOUT:
+		{
+			wxMessageBox(
+				"VCamdroid NEXT\n\nWireless camera bridge that turns an Android phone into a webcam for Windows.\n\nMaterial 3 desktop client.",
+				"About VCamdroid NEXT",
+				wxOK | wxICON_INFORMATION,
+				mainWindow);
+			break;
+		}
+
+		case Window::MenuIDs::EXIT:
+		{
+			if (mainWindow)
+				mainWindow->Close(true);
 			break;
 		}
 
@@ -322,6 +426,10 @@ void Application::OnSourceChanged(wxEvent& event)
 
 	rtspManager->Connect2Stream(deviceId, state);
 
+	streamLive = false;
+	mainWindow->SetStreaming(false);
+	mainWindow->SetStatus("Connecting", Material::Colors().tertiary);
+
 	// Update UI Zoom Label to match state
 	mainWindow->GetZoomLevelLabel()->SetLabelText(wxString::Format("%.1fx", state.zoom));
 }
@@ -338,6 +446,60 @@ void Application::OnWindowCloseEvent(wxCloseEvent& event)
 	Settings::Save();
 
 	event.Skip();
+}
+
+void Application::SetThemeMode(int mode)
+{
+	Settings::Set("THEME_MODE", mode);
+	Settings::Save();
+
+	if (mode == 1)
+		SetAppearance(Appearance::Light);
+	else if (mode == 2)
+		SetAppearance(Appearance::Dark);
+	else
+		SetAppearance(Appearance::System);
+
+	if (!mainWindow || !server)
+		return;
+
+	// Rebuild the frame so every Material surface resolves the new palette.
+	// The RTSP receiver keeps running; the frame callback simply points at the
+	// new canvas as soon as this returns.
+	Window* old = mainWindow;
+	mainWindow = nullptr;
+	mainWindow = new Window(server->GetHostInfo());
+	BindEventListeners();
+	UpdateAvailableDevices();
+	mainWindow->Show();
+
+	if (old)
+		old->Destroy();
+}
+
+void Application::ApplySettings()
+{
+	const int mode = Settings::Get("THEME_MODE");
+	if (mode != appliedThemeMode)
+	{
+		appliedThemeMode = mode;
+		// Rebuilding the frame from inside a control event would destroy the
+		// control that is still handling the event, so defer it.
+		if (mainWindow)
+		{
+			mainWindow->GetEventHandler()->CallAfter([this, mode]() {
+				SetThemeMode(mode);
+			});
+		}
+		return;
+	}
+
+	const bool show = Settings::Get("SHOW_STATS") == 1;
+	if (mainWindow && mainWindow->GetStatsText())
+	{
+		mainWindow->GetStatsText()->Show(show);
+		mainWindow->Layout();
+	}
 }
 
 void Application::EnsureStateInitialized(std::string name, const DeviceDescriptor& descriptor)

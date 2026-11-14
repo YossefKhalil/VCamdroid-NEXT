@@ -42,17 +42,25 @@ data class StreamOptions(
             val height = buffer.getInt()
 
             val camera = if (buffer.getInt() == 1) CameraHelper.Facing.BACK else CameraHelper.Facing.FRONT
-            val adaptiveBitrate = buffer.get().toInt() == 1
+            // The Windows client serializes booleans as 32-bit integers (see
+            // Serializer::WriteBool). Reading a single byte here shifted every
+            // following field and corrupted the bitrate/filter options.
+            val adaptiveBitrate = buffer.getInt() == 1
 
-            val bitrate = buffer.getInt()
-            val minBitrate = buffer.getInt()
-            val maxBitrate = buffer.getInt()
+            // The Windows client stores and sends bitrates in kbps, while
+            // RootEncoder expects bits per second.
+            val bitrate = buffer.getInt() * 1024
+            val minBitrate = buffer.getInt() * 1024
+            val maxBitrate = buffer.getInt() * 1024
 
-            val stabilization = buffer.get().toInt() == 1
-            val flash = buffer.get().toInt() == 1
-            val h265 = buffer.get().toInt() == 1
+            val stabilization = buffer.getInt() == 1
+            // Flash is applied through a separate PacketType.FLASH packet.
+            buffer.getInt()
+            val h265 = buffer.getInt() == 1
 
-            val focusMode = buffer.getInt()
+            // focusMode is not part of the activation packet; it defaults to auto
+            // and can be changed later through PacketType.FOCUS.
+            val focusMode = 0
 
             fun readString(): String {
                 val len = buffer.short.toInt() and 0xFFFF // Unsigned short
@@ -67,6 +75,14 @@ data class StreamOptions(
             repeat(filterCount) {
                 val fname = readString()
                 val fvalue = buffer.getInt()
+                // The Windows client fills every correction filter with a
+                // default value of 50. Applying those "neutral" filters still
+                // pushes pixels through RootEncoder's filters, and the
+                // saturation shader in particular badly corrupts colors.
+                // Only activate a filter when the user actually moved it.
+                if (fvalue == 50) {
+                    return@repeat
+                }
                 FilterRepository.create(fname)?.let {
                     FilterAdjuster.adjust(it, fvalue)
                     filtersMap.add(it)

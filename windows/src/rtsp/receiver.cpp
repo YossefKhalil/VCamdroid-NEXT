@@ -98,19 +98,37 @@ namespace RTSP
 			return false;
 		}
 
-		const AVCodec* codec = avcodec_find_decoder(AV_CODEC_ID_H264);
+		const AVCodecParameters* params = ctx->streams[streamIdx]->codecpar;
+		const AVCodec* codec = avcodec_find_decoder(params->codec_id);
 		if (!codec)
 		{
-			logger << "[RTSP] Error: H264 decoder not found\n";
+			// Fall back to H.264 for streams that do not advertise a usable
+			// codec id (some RTSP servers leave it unset).
+			codec = avcodec_find_decoder(AV_CODEC_ID_H264);
+		}
+		if (!codec)
+		{
+			logger << "[RTSP] Error: No suitable video decoder found\n";
 			return false;
 		}
 
 		*codecCtx = avcodec_alloc_context3(codec);
+		if (!*codecCtx)
+		{
+			logger << "[RTSP] Error: Could not allocate codec context\n";
+			return false;
+		}
 
-		avcodec_parameters_to_context(*codecCtx, ctx->streams[streamIdx]->codecpar);
+		avcodec_parameters_to_context(*codecCtx, params);
 
-		(*codecCtx)->width = width;
-		(*codecCtx)->height = height;
+		// Do not overwrite the dimensions from the stream parameters. The
+		// caller passes 0 here, and forcing width/height to 0 prevented the
+		// decoder from configuring itself correctly on the first frames.
+		if (width > 0 && height > 0)
+		{
+			(*codecCtx)->width = width;
+			(*codecCtx)->height = height;
+		}
 
 		if ((*codecCtx)->pix_fmt == AV_PIX_FMT_NONE) 
 		{
@@ -201,8 +219,8 @@ namespace RTSP
 			{
 				// Accumulate frame count (for fps)
 				frameAccumulator++;
-				stats.width = pFrame->height;
-				stats.height = pFrame->width;
+				stats.width = pFrame->width;
+				stats.height = pFrame->height;
 
 				if (onFrameReceivedCallback) 
 				{

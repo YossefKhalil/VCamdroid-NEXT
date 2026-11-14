@@ -50,36 +50,43 @@ class QRScanner() {
             val image = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
             val result = scanner.process(image)
                 .addOnSuccessListener { barcodes ->
+                    // Accept a valid QR anywhere in the frame. The overlay is only a
+                    // visual guide; requiring the bounding box to be fully inside it
+                    // made ML Kit silently ignore perfectly readable codes.
                     for (barcode in barcodes) {
-                        // Only capture QR codes that are inside the given rectangle area
-                        barcode.boundingBox?.let {
-                            if(!rect.contains(it)) {
-                                imageProxy.close()
-                                return@addOnSuccessListener
-                            }
+                        val parsed = parseResult(barcode.rawValue ?: "")
+                        if (parsed != null) {
+                            // Stop the scanner. Further attempts at connecting should be
+                            // manually triggered otherwise multiple connections might be
+                            // established (for each frame of the camera).
+                            stop()
+                            callback(parsed)
+                            imageProxy.close()
+                            return@addOnSuccessListener
                         }
-                        // Stop the scanner. Further attempts at connecting should be
-                        // manually triggered otherwise multiple connection might be established
-                        // (for each frame of the camera)
-                        stop()
-                        callback(parseResult(barcode.rawValue ?: ""))
                     }
                     imageProxy.close()
                 }
                 .addOnFailureListener {
                     imageProxy.close()
                 }
+        } else {
+            imageProxy.close()
         }
     }
 
     private fun parseResult(value: String): Result? {
-        val splits = value.split(":")
+        val splits = value.trim().split(":")
         if(splits.size != 2) {
             return null
         }
-        if(splits[0].matches(addressRegex)) {
-            return Result(splits[0], splits[1].toInt())
+
+        val address = splits[0].trim()
+        val port = splits[1].trim().toIntOrNull() ?: return null
+        if(!address.matches(addressRegex) || port !in 1..65535) {
+            return null
         }
-        return null
+
+        return Result(address, port)
     }
 }

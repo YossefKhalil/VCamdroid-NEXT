@@ -18,20 +18,31 @@ void Connection::Read()
 	socket.async_read_some(asio::buffer(byteBuffer, 255), [this](asio::error_code ec, size_t bytes) {
 		if (!ec)
 		{
-			onBytesReceived(this->shared_from_this(), (const uint8_t*)byteBuffer, bytes);
+			try
+			{
+				onBytesReceived(this->shared_from_this(), (const uint8_t*)byteBuffer, bytes);
+			}
+			catch (const std::exception& e)
+			{
+				logger << "[CONNECTION] onBytesReceived failed: " << e.what() << std::endl;
+			}
 			Read();
 		}
 		else
 		{
-			// When the connection is closed by the server this function may still be called
-			// and then the socket will be invalid so wrap it in a try/catch
-			// 
-			// Also the close() method is called inside the try to avoid closing
-			// the socket again when the server is stopped
-			try {
+			// When the connection is closed by the server this function may still
+			// be called and then the socket will be invalid so wrap the endpoint
+			// lookup in a try/catch. Close() itself is always called so the
+			// disconnect callback can never be skipped.
+			try
+			{
 				logger << "[CONNECTION@" << this->socket.remote_endpoint() << "] Closed with error code: " << ec << std::endl;
-				Close();
-			} catch(std::exception e) { }
+			}
+			catch (const std::exception& e)
+			{
+				logger << "[CONNECTION] Closed with error code: " << ec << " (" << e.what() << ")" << std::endl;
+			}
+			Close();
 		}
 	});
 }

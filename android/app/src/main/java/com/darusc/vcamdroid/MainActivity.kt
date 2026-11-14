@@ -47,6 +47,9 @@ class MainActivity : AppCompatActivity(), ConnectionManager.ConnectionStateCallb
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Keep the display awake while the app is visible. Without this the phone
+        // sleeps after the system timeout, which stops the camera and drops the stream.
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         viewBinding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(viewBinding.root)
 
@@ -97,11 +100,17 @@ class MainActivity : AppCompatActivity(), ConnectionManager.ConnectionStateCallb
     }
 
     override fun onConnectionSuccessful(connectionMode: ConnectionManager.Mode) {
-        qrscanner.stop()
-        Logger.log("MAIN", "Connection successful $connectionMode")
+        runOnUiThread {
+            isConnecting = false
+            qrscanner.stop()
+            // Release the CameraX use cases before the RTSP streamer opens the
+            // camera, otherwise both sessions can fight over the device.
+            camera?.stop()
+            Logger.log("MAIN", "Connection successful $connectionMode")
 
-        val intent = Intent(this, StreamActivity::class.java)
-        startActivity(intent)
+            val intent = Intent(this, StreamActivity::class.java)
+            startActivity(intent)
+        }
     }
 
     override fun onConnectionFailed(connectionMode: ConnectionManager.Mode) {
@@ -112,9 +121,10 @@ class MainActivity : AppCompatActivity(), ConnectionManager.ConnectionStateCallb
                 Toast.makeText(this, "Connection failed. Try in WiFi mode or restart app", Toast.LENGTH_LONG).show()
             } else {
                 isConnecting = false
-                qrscanner.stop()
+                // Allow another scan instead of forcing the user to restart the app.
+                qrscanner.start()
                 Logger.log("MAIN", "Error: Cannot connect!")
-                Toast.makeText(this, "Connection failed. Restart app to retry connecting again", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, "Connection failed. Scan the QR code again", Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -162,15 +172,15 @@ class MainActivity : AppCompatActivity(), ConnectionManager.ConnectionStateCallb
         qrscanner.launchScanTask(imageProxy, camera?.screenRectToImageRect(viewBinding.overlay.rect, viewBinding.overlay.size) ?: Rect()) { result ->
             runOnUiThread {
                 if(result != null) {
+                    if (isConnecting) {
+                        return@runOnUiThread
+                    }
+                    // Connect immediately after a valid scan. The old confirmation
+                    // dialog was unnecessary friction and made re-pairing slow.
+                    isConnecting = true
                     qrscanner.stop()
-                    MaterialAlertDialogBuilder(this)
-                        .setTitle("Connect via WiFi")
-                        .setMessage("Connect to ${result.address}:${result.port}?")
-                        .setPositiveButton("Connect") { _, _ ->
-                            connectionManager.connect(result.address, result.port)
-                        }
-                        .setNegativeButton("Cancel") { _, _ -> qrscanner.start() }
-                        .show()
+                    Toast.makeText(this, "Connecting to ${result.address}:${result.port}", Toast.LENGTH_SHORT).show()
+                    connectionManager.connect(result.address, result.port)
                 } else {
                     Logger.log("MAIN", "Invalid QR code")
                     Toast.makeText(this, "Invalid QR code", Toast.LENGTH_SHORT).show()

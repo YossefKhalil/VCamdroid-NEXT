@@ -7,15 +7,17 @@
     android:fitsSystemWindows="true"
     android:background="@color/black"
     android:backgroundTint="@color/black"
+    android:keepScreenOn="true"
     tools:context=".StreamActivity">
 
     <com.pedro.library.view.OpenGlView
         android:id="@+id/surfaceView"
-        android:layout_width="0dp"
+        android:layout_width="match_parent"
         android:layout_height="match_parent"
-        app:layout_constraintDimensionRatio="H,3:4"
+        app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent"
         tools:ignore="MissingConstraints" />
 
 <!--    <ImageButton-->

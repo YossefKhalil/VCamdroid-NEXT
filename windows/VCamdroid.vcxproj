@@ -44,6 +44,7 @@
     <UseDebugLibraries>true</UseDebugLibraries>
     <PlatformToolset>v145</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
+    <TargetName>VCamdroid NEXT</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
@@ -51,6 +52,7 @@
     <PlatformToolset>v145</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>Unicode</CharacterSet>
+    <TargetName>VCamdroid NEXT</TargetName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings">
@@ -107,14 +109,14 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;WIN32_LEAN_AND_MEAN;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>$(SolutionDir)3rdparty\softcam\dist\include;$(ProjectDir)include;$(ProjectDir)res;$(ProjectDir)src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(FFMPEG_ROOT)\include;$(SolutionDir)3rdparty\softcam\dist\include;$(ProjectDir)include;$(ProjectDir)res;$(ProjectDir)src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>$(SolutionDir)3rdparty\softcam\dist\lib\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>softcam.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(FFMPEG_ROOT)\lib;$(SolutionDir)3rdparty\softcam\dist\lib\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>softcam.lib;avformat.lib;avcodec.lib;swscale.lib;avutil.lib;swresample.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
       <Command>xcopy "$(ProjectDir)adb" "$(OutDir)adb\" /y /f</Command>
@@ -128,7 +130,7 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>$(ProjectDir)include;$(SolutionDir)3rdparty\softcam\dist\include;$(ProjectDir)res;$(ProjectDir)src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(FFMPEG_ROOT)\include;$(ProjectDir)include;$(SolutionDir)3rdparty\softcam\dist\include;$(ProjectDir)res;$(ProjectDir)src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
     </ClCompile>
     <Link>
@@ -136,8 +138,8 @@
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>$(SolutionDir)3rdparty\softcam\dist\lib\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>softcam.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(FFMPEG_ROOT)\lib;$(SolutionDir)3rdparty\softcam\dist\lib\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>softcam.lib;avformat.lib;avcodec.lib;swscale.lib;avutil.lib;swresample.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
       <Command>xcopy "$(OutDir)$(TargetFileName)" "$(ProjectDir)..\dist\" /y /f
@@ -146,16 +148,26 @@ xcopy "$(ProjectDir)res" "$(ProjectDir)..\dist\res\" /y /f
 xcopy "$(ProjectDir)adb" "$(ProjectDir)..\dist\adb\" /y /f
 xcopy "$(ProjectDir)adb" "$(OutDir)adb\" /y /f
 xcopy "$(ProjectDir)3rdparty\softcam\dist\bin\x64\softcam.dll" "$(ProjectDir)..\dist\" /y /f
-xcopy "$(ProjectDir)3rdparty\softcam\examples\softcam_installer\x64\Release\softcam_installer.exe" "$(ProjectDir)..\dist\" /y /f</Command>
+xcopy "$(ProjectDir)3rdparty\softcam\examples\softcam_installer\x64\Release\softcam_installer.exe" "$(ProjectDir)..\dist\" /y /f
+xcopy "$(FFMPEG_ROOT)\bin\avcodec-*.dll" "$(ProjectDir)..\dist\" /y /f
+xcopy "$(FFMPEG_ROOT)\bin\avformat-*.dll" "$(ProjectDir)..\dist\" /y /f
+xcopy "$(FFMPEG_ROOT)\bin\avutil-*.dll" "$(ProjectDir)..\dist\" /y /f
+xcopy "$(FFMPEG_ROOT)\bin\swscale-*.dll" "$(ProjectDir)..\dist\" /y /f
+xcopy "$(FFMPEG_ROOT)\bin\swresample-*.dll" "$(ProjectDir)..\dist\" /y /f</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="src\application.cpp" />
+    <ClCompile Include="src\qrcodegen.cpp" />
     <ClCompile Include="src\directshowsource.cpp" />
     <ClCompile Include="src\gui\devicesview.cpp" />
     <ClCompile Include="src\gui\imgadjdlg.cpp" />
     <ClCompile Include="src\gui\qrconview.cpp" />
     <ClCompile Include="src\gui\streamconfigdlg.cpp" />
+    <ClCompile Include="src\gui\settingsdlg.cpp" />
+    <ClCompile Include="src\gui\settingspanel.cpp" />
+    <ClCompile Include="src\gui\devicespanel.cpp" />
+    <ClCompile Include="src\gui\theme.cpp" />
     <ClCompile Include="src\net\connection.cpp" />
     <ClCompile Include="src\net\serializer.cpp" />
     <ClCompile Include="src\rtsp\manager.cpp" />
@@ -205,6 +217,10 @@ xcopy "$(ProjectDir)3rdparty\softcam\examples\softcam_installer\x64\Release\soft
     <ClInclude Include="src\gui\imgadjdlg.h" />
     <ClInclude Include="src\gui\qrconview.h" />
     <ClInclude Include="src\gui\streamconfigdlg.h" />
+    <ClInclude Include="src\gui\settingsdlg.h" />
+    <ClInclude Include="src\gui\settingspanel.h" />
+    <ClInclude Include="src\gui\devicespanel.h" />
+    <ClInclude Include="src\gui\theme.h" />
     <ClInclude Include="src\gui\window.h" />
     <ClInclude Include="src\logger.h" />
     <ClInclude Include="src\net\connection.h" />
@@ -226,7 +242,9 @@ xcopy "$(ProjectDir)3rdparty\softcam\examples\softcam_installer\x64\Release\soft
     <ClInclude Include="src\video\1_1scaler.h" />
   </ItemGroup>
   <ItemGroup>
-    <ResourceCompile Include="res\resource.rc" />
+    <ResourceCompile Include="res\resource.rc">
+      <AdditionalInputs>res\vcamdroid.ico</AdditionalInputs>
+    </ResourceCompile>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\rtsp\receiver.cpp" />

@@ -3,233 +3,251 @@
     <img src="imgs/icon2.png" width="150">
   </sub>
   <br>
-  VCamdroid
+  VCamdroid NEXT
 </h1>
 
 <p align="center">Turn your Android phone into a high-performance Windows webcam.</p>
 
 <p align="center">
-  <a href="https://github.com/darusc/VCamdroid/blob/main/LICENSE">
-    <img src="https://img.shields.io/github/license/darusc/VCamdroid?style=for-the-badge" alt="License">
+  <a href="https://github.com/YossefKhalil/VCamdroid-NEXT/blob/main/LICENSE">
+    <img src="https://img.shields.io/github/license/YossefKhalil/VCamdroid-NEXT?style=for-the-badge" alt="License">
   </a>
-  <a href="https://github.com/darusc/VCamdroid/releases">
-    <img src="https://img.shields.io/github/v/release/darusc/VCamdroid?style=for-the-badge" alt="Release">
-  </a>
-  <a href="https://github.com/darusc/VCamdroid/releases">
-    <img src="https://img.shields.io/github/downloads/darusc/VCamdroid/total?style=for-the-badge" alt="Downloads">
+  <a href="https://github.com/YossefKhalil/VCamdroid-NEXT/releases">
+    <img src="https://img.shields.io/github/v/release/YossefKhalil/VCamdroid-NEXT?style=for-the-badge" alt="Release">
   </a>
 </p>
 
 ## Table of Contents
 
 1. [**Description**](#description)
-2. [**Key Features**](#key-features)
-3. [**Installation Guide**](#installation-guide)
-4. [**Usage Instructions**](#usage-instructions)
-5. [**Troubleshooting**](#troubleshooting)
-6. [**Reporting Issues**](#reporting-issues)
-7. [**Technical Architecture**](#technical-architecture)
-8. [**Contributing**](#contributing)
+2. [**What's new in NEXT**](#whats-new-in-next)
+3. [**Key Features**](#key-features)
+4. [**Installation Guide**](#installation-guide)
+5. [**Usage Instructions**](#usage-instructions)
+6. [**Troubleshooting**](#troubleshooting)
+7. [**Reporting Issues**](#reporting-issues)
+8. [**Technical Architecture**](#technical-architecture)
+9. [**Contributing**](#contributing)
 
 ## Description
 
-VCamdroid allows you to seamlessly use your mobile device’s camera as a virtual webcam on your PC. Built using a custom DirectShow filter provided by [Softcam library](https://github.com/tshino/softcam), it ensures compatibility with popular applications like Zoom, OBS, Discord, and Teams. Whether wired (via ADB) or wireless (via Wi-Fi), VCamdroid delivers a low-latency, hardware-accelerated video feed directly to your desktop.
+VCamdroid NEXT is a maintained fork of VCamdroid that focuses on stability, protocol robustness and a modern desktop experience. It turns your mobile device's camera into a virtual webcam for Windows using a custom DirectShow filter provided by the [Softcam library](https://github.com/tshino/softcam), so it works with Zoom, OBS, Discord, Teams and any other application that supports standard webcams.
+
+Connect over USB for the lowest latency, or over Wi-Fi with the built-in QR code pairing. The stream is hardware-encoded on the phone and decoded on the PC for a smooth, low-overhead video feed.
 
 <p align="center">
-  <img src="imgs/demo.gif" width="600" alt="VCamdroid Demo">
+  <img src="imgs/demo.gif" width="600" alt="VCamdroid NEXT Demo">
 </p>
+
+## What's new in NEXT
+
+VCamdroid NEXT is version **2.0.0-NEXT**. It is built from the original 1.3.x codebase with the fixes and polish collected below.
+
+### Desktop client (Windows)
+
+* **Material 3 interface.** The whole client was rebuilt around the Material 3 design language: a light and dark blue/ocean colour scheme, cards, tonal controls, rounded surfaces and a proper type scale.
+* **Optional theme.** Follow the system theme, or lock the client to Light or Dark.
+* **QR code is always ready.** The main page shows the pairing QR code immediately, so no extra "Connect" step is needed.
+* **In-app pages instead of modal windows.** Settings and Connected devices open as normal pages with a back button, which also removes the crash-on-close that affected the old dialogs.
+* **Short, focused menu.** The overflow menu only contains the essentials; stream settings and image adjustments live in the toolbar, and everything else moved into the Settings page.
+* **Crash-on-connect fixes.** Device callbacks are marshalled onto the UI thread, descriptor parsing is bounds-checked, the TCP server starts after the window exists, and disconnects always close the socket cleanly.
+* **Dynamic codec support.** The RTSP receiver now picks the decoder from the negotiated codec, so H.264 and H.265/HEVC both work.
+* **Aspect-ratio correct preview.** The preview canvas adapts to the real window size and letterboxes the stream instead of stretching it.
+* **Colour fix.** The client no longer seeds every correction filter at its neutral value, which previously caused extreme saturation/colour corruption until the resolution was changed.
+* **New app icon.** A modern frosted Material 3 webcam icon, in circular form, used for the window, taskbar and installer.
+
+### Android app
+
+* **Auto-connect after QR scan.** Scanning a valid QR code connects immediately; the old "Connect to this IP?" dialog is gone.
+* **Correct preview aspect ratio.** The preview view is no longer forced into a 3:4 box and now uses fit/letterbox scaling.
+* **Robust TCP framing.** An accumulator reassembles split or coalesced control packets so activation and resolution changes are not lost.
+* **Keep screen awake.** The phone stays on while streaming.
+* **Neutral filter fix.** Default colour-correction values are skipped, and the remaining slider mappings were corrected so colours stay accurate.
+* **Version 2.0.0-NEXT**, with a new version code (200).
 
 ## Key Features
 
 * **Universal Compatibility:** Works with any Windows application that supports standard webcams.
-* **Flexible Connectivity:** Supports high-speed wired connections (via ADB) and convenient wireless connections (via Wi-Fi).
-* **Multi-Device Support:** Connect multiple Android devices simultaneously and switch between them instantly.
-* **Full Camera Control:** Remotely toggle between front and back cameras, adjust resolutions, and enable flash.
-* **Image Adjustments:** Real-time controls for rotation, mirroring (flip), brightness, contrast, and saturation.
-* **Zero-Config Pairing:** Automatically connects over USB via ADB; straightforward QR code pairing for Wi-Fi.
-
+* **Flexible Connectivity:** High-speed wired connections over ADB, or convenient wireless connections over Wi-Fi.
+* **Multi-Device Support:** Connect multiple Android devices and switch between them instantly.
+* **Full Camera Control:** Toggle between front and back cameras, change resolution, adjust bitrate, and enable the flash.
+* **Image Adjustments:** Real-time rotation, mirroring (flip), brightness, contrast, saturation and other filters.
+* **Zero-Config Pairing:** Automatic USB connection through ADB, and instant QR-code pairing for Wi-Fi.
+* **Modern Desktop UX:** A Material 3 client with a light/dark theme, in-app settings, and a live preview.
 
 ## Installation Guide
 
 ### Prerequisites
-* **PC:** Windows 10 or 11.
+* **PC:** Windows 10 or 11 (x64).
 * **Phone:** Android 7.0 (Nougat) or higher.
 
 ### Step 1: Install on Windows
-1.  Download the latest binaries from the [**Releases Page**](https://github.com/darusc/VCamdroid/releases).
-2.  Extract the ZIP archive.
-3.  Right-click `install.bat` and select **Run as Administrator**.
-    * *Note: This script registers `softcam.dll` with the system, making the virtual webcam device visible to other applications.*
-4. Check both **Private** and **Public** profiles in the Windows Firewall popup and allow the app
+1. Download the latest **VCamdroid NEXT** installer from the [Releases Page](https://github.com/YossefKhalil/VCamdroid-NEXT/releases), or run `VCamdroid-NEXT-Setup.exe`.
+2. Run the installer. It registers `softcam.dll` with the system so the virtual webcam becomes visible to other applications.
+3. When the Windows Firewall prompt appears, allow the app on both **Private** and **Public** networks.
+
+> If you install the ZIP build manually, run `install.bat` as Administrator, or register the filter with `regsvr32 softcam.dll`.
 
 ### Step 2: Install on Android
-You can transfer the APK file to your phone and install it manually, or follow the steps below for an automatic install:
-1.  Connect your phone to your PC via USB.
-2.  Ensure **USB Debugging** is enabled (see instructions below).
-3.  Run `install_apk.bat` on your PC to automatically install the app on your phone.
-
+Install `VCamdroid-NEXT.apk` on your phone. You can copy it from the installer's `apk` folder, or use `install_apk.bat` with USB debugging enabled to install it automatically.
 
 ### 💡 How to Enable USB Debugging
-1.  Go to **Settings > About Phone**.
-2.  Find **Build Number** and tap it **7 times** until you see "You are now a developer!"
-3.  Go back to **Settings > System > Developer Options**.
-4.  Toggle **USB Debugging** to **ON**.
+1. Go to **Settings > About Phone**.
+2. Find **Build Number** and tap it **7 times** until you see "You are now a developer!"
+3. Go back to **Settings > System > Developer Options**.
+4. Toggle **USB Debugging** to **ON**.
     * *For device-specific steps, refer to the [official Android documentation](https://developer.android.com/studio/debug/dev-options).*
-
 
 ## Usage Instructions
 
 ### Wired Connection (USB / ADB)
 *Recommended for lowest latency and highest stability.*
 
-1.  Connect your phone to the PC via USB.
-2.  Launch the **VCamdroid Desktop Client**.
-3.  Launch the **VCamdroid App** on your phone.
-4.  The connection is automatic. App should change to streaming mode.
+1. Connect your phone to the PC via USB.
+2. Launch the **VCamdroid NEXT** desktop client.
+3. Launch the **VCamdroid NEXT** app on your phone.
+4. The connection is automatic. The phone switches to streaming mode and the preview appears on the PC.
 
 ### Wireless Connection (Wi-Fi)
-1.  Ensure both your PC and phone are on the same Wi-Fi network.
-2.  Launch the **VCamdroid Desktop Client** and select the **Connect** tab to reveal a QR Code.
-3.  Launch the **VCamdroid App** on your phone.
-4.  Point your camera at the PC screen to scan the QR code. Clicl 'connect' in the popup dialog.
+1. Ensure both your PC and phone are on the same Wi-Fi network.
+2. Launch the **VCamdroid NEXT** desktop client. The pairing QR code is already shown on the main page.
+3. Launch the **VCamdroid NEXT** app on your phone.
+4. Point the camera at the PC screen. The app connects automatically once the QR code is recognised.
 
-If you encounter any problems check the [**Troubleshooting**](#troubleshooting) section. If the issue still persist, please [report the issue](#reporting-issues).
-
+If you encounter any problems check the [**Troubleshooting**](#troubleshooting) section. If the issue still persists, please [report the issue](#reporting-issues).
 
 ---
 
 ## Technical Architecture
 
 ### Networking Protocol
-VCamdroid utilizes the industry-standard **RTSP (Real-Time Streaming Protocol)** to ensure robust, low-latency video transmission between the Android device and the Windows client.
+VCamdroid NEXT uses the industry-standard **RTSP (Real-Time Streaming Protocol)** for robust, low-latency video transmission between the Android device and the Windows client.
 
-1.  **Transport Layer:**
+1. **Transport Layer:**
     * **Wi-Fi Connection:** The Windows client connects directly to the RTSP server running on the Android device over the local network.
-    * **USB Connection:** To enable wired communication, the application uses **ADB Port Forwarding**. Since ADB only supports TCP forwarding, the RTSP stream is tunneled exclusively over **TCP** (interleaved RTSP). This creates a stable, high-bandwidth tunnel via `localhost` that bypasses network interference.
+    * **USB Connection:** Wired communication uses **ADB Port Forwarding**. Since ADB only supports TCP forwarding, the RTSP stream is tunnelled over **TCP** (interleaved RTSP), creating a stable high-bandwidth path through `localhost`.
+2. **Stream Handling Libraries:**
+    * **Server Side (Android):** Powered by the [RootEncoder](https://github.com/pedroSG94/RootEncoder) library. It interfaces with the Android encoder, packetises the video into RTP packets, and manages the RTSP server session.
+    * **Client Side (Windows):** Uses [FFmpeg](https://ffmpeg.org/) to demux the RTSP stream and decode the incoming video packets. The decoder is selected dynamically from the negotiated codec, so both H.264 and H.265/HEVC are supported.
 
-2.  **Stream Handling Libraries:**
-    * **Server Side (Android):** Powered by the [RootEncoder](https://github.com/pedroSG94/RootEncoder) library. It handles the complex tasks of interfacing with the Android encoder, packetizing the video data into RTP packets, and managing the RTSP server session.
-    * **Client Side (Windows):** Utilizes [FFmpeg](https://ffmpeg.org/), the leading multimedia framework, to robustly demux the RTSP stream and decode the incoming video packets.
-
-<p align="center"><img src="imgs/network.png" width="60%"></p> 
+<p align="center"><img src="imgs/network.png" width="60%"></p>
 
 ### Video Pipeline
-The pipeline is engineered for performance, offloading image processing to the Android GPU before compression to minimize latency and bandwidth.
+The pipeline is engineered for performance, offloading image processing to the Android GPU before compression to minimise latency and bandwidth.
 
-1.  **Capture, Process & Encode (Android):**
-    * **Capture:** Video frames are captured using the modern **Camera2 API**.
-    * **Pre-Processing:** Raw frames are processed on the GPU using OpenGL. Operations like **Rotation**, **Mirroring (Flip)**, and **Color Correction** are applied here *before* encoding, ensuring the stream is "ready-to-display."
-    * **Hardware Encoding:** The processed frames are passed to the device's hardware **MediaCodec** (supporting **H.264** or **H.265/HEVC**). This offloads compression from the CPU.
-    * **Transmission:** **RootEncoder** encapsulates the encoded stream into RTP packets and transmits them over the active network connection.
-
-2.  **Decode & Render (Windows):**
-    * **Decoding:** The Windows client receives the RTSP stream and uses **FFmpeg** to decode the compressed H.264/H.265 frames into raw image data (YUV/RGB).
+1. **Capture, Process & Encode (Android):**
+    * **Capture:** Video frames are captured with the modern **Camera2 API**.
+    * **Pre-Processing:** Frames are processed on the GPU with OpenGL. Rotation, mirroring and colour correction are applied before encoding.
+    * **Hardware Encoding:** The processed frames are passed to the device's hardware **MediaCodec** (H.264 or H.265/HEVC), offloading compression from the CPU.
+    * **Transmission:** **RootEncoder** packetises the encoded stream and transmits it over the active connection.
+2. **Decode & Render (Windows):**
+    * **Decoding:** The Windows client receives the RTSP stream and uses **FFmpeg** to decode the compressed frames into raw image data.
     * **Output:**
-        * **UI Preview:** The decoded frame is rendered immediately to the application window for live monitoring.
-        * **Virtual Device:** The frame is written to a ring buffer managed by the [Softcam](https://github.com/tshino/softcam) library. Softcam acts as the bridge between the user application and the system-registered DirectShow filter, allowing third-party apps (Zoom, Teams, OBS) to treat the stream as a physical webcam device.
+        * **UI Preview:** The decoded frame is rendered in the client window with correct aspect-ratio scaling.
+        * **Virtual Device:** The frame is written to a ring buffer managed by the [Softcam](https://github.com/tshino/softcam) library, which bridges the client and the system-registered DirectShow filter so third-party apps can use the stream as a physical webcam.
 
-<p align="center"><img src="imgs/pipeline.png" width="50%"></p> 
-
+<p align="center"><img src="imgs/pipeline.png" width="50%"></p>
 
 ## 🤝 Contributing
 
-We actively welcome contributions! Whether you're fixing a bug, optimizing performance, or adding a cool new feature, please feel free to fork the repository and submit a Pull Request.
+Contributions are welcome. Whether you are fixing a bug, improving performance, or adding a feature, feel free to fork the repository and submit a Pull Request.
 
 ### 📂 Repository Structure
-* `android/`: The Android Studio project (Kotlin). Handles Camera2 API capture, OpenGL processing, and RTSP streaming.
-* `windows/`: The Visual Studio solution (C++). Contains the Desktop Client GUI and the DirectShow Filter logic.
+* `android/`: The Android Studio project (Kotlin). Handles Camera2 API capture, OpenGL processing and RTSP streaming.
+* `windows/`: The Visual Studio solution (C++). Contains the Desktop Client GUI and the DirectShow filter integration.
 
 ---
 
 ### 🛠️ Development Setup
 
 #### 📱 Android App
-1.  **Prerequisites:** Install the latest **Android Studio**.
-2.  **Import:** Open the `android/` directory as a project.
-3.  **Build:** Let Gradle sync and download dependencies.
+1. **Prerequisites:** Install the latest **Android Studio**.
+2. **Import:** Open the `android/` directory as a project.
+3. **Build:** Let Gradle sync and download dependencies.
     * *Core Dependency:* [RootEncoder](https://github.com/pedroSG94/RootEncoder) (handles RTSP/RTP packets).
-4.  **Run:** Connect a physical Android device (emulators often lack necessary encoder hardware) and run the `app` module.
+4. **Run:** Connect a physical Android device (emulators often lack the necessary encoder hardware) and run the `app` module.
 
 #### 💻 Windows Client
-1.  **Prerequisites:**
-    * **Visual Studio 2026** (with "Desktop development with C++" workload).
-    * **vcpkg** for ```asio 1.32.0```, ```wxWidgets 3.3.1``` and ```ffmpeg 7.1.2```.
-
-2.  **Install Dependencies:**
-    Use `vcpkg` to install the required libraries for **x64**:
+1. **Prerequisites:**
+    * **Visual Studio 2022** with the "Desktop development with C++" workload (the project targets the **v143** toolset).
+    * **vcpkg** for `asio`, `wxWidgets 3.3.x` and `ffmpeg`.
+2. **Install Dependencies:**
     ```powershell
     vcpkg install wxwidgets:x64-windows ffmpeg:x64-windows
     vcpkg integrate install
     ```
-
-3.  **Build Instructions:**
-    * Build ```softcam```. [See](https://github.com/tshino/softcam?tab=readme-ov-file#how-to-build-the-library) for instructions.
+3. **Build Instructions:**
+    * Build `softcam`. See the [Softcam repository](https://github.com/tshino/softcam?tab=readme-ov-file#how-to-build-the-library) for instructions.
     * Open `windows/VCamdroid.sln`.
     * Set the configuration to **Release / x64** (x86 is not supported).
     * Build the solution.
-
-4.  **Testing the Driver:**
+4. **Testing the Driver:**
     * The DirectShow filter (`softcam.dll`) must be registered to be visible to apps like OBS or Zoom.
-    * Run `install.bat` as Administrator in your output directory, or manually register it via:
+    * Run `install.bat` as Administrator in your output directory, or register it manually:
         ```cmd
         regsvr32 softcam.dll
         ```
 
 ### 📬 Submitting a Pull Request
-1.  Fork the project.
-2.  Create your feature branch (`git checkout -b feature/AmazingFeature`).
-3.  Commit your changes (`git commit -m 'Add some AmazingFeature'`).
-4.  Push to the branch (`git push origin feature/AmazingFeature`).
-5.  Open a Pull Request.
-
+1. Fork the project.
+2. Create your feature branch (`git checkout -b feature/AmazingFeature`).
+3. Commit your changes (`git commit -m 'Add some AmazingFeature'`).
+4. Push to the branch (`git push origin feature/AmazingFeature`).
+5. Open a Pull Request.
 
 ## Troubleshooting
 
 ### App Crashes / "VCRUNTIME140.dll was not found"
-If the application closes immediately or you see a system popup error regarding missing DLLs (like `VCRUNTIME140.dll` or `MSVCP140.dll`), your PC is missing the C++ runtime libraries.
+If the application closes immediately or you see a system popup about missing DLLs (like `VCRUNTIME140.dll` or `MSVCP140.dll`), your PC is missing the C++ runtime libraries.
 * **Fix:** Download and install the [latest VC++ Redistributable (x64)](https://aka.ms/vs/17/release/vc_redist.x64.exe) from Microsoft.
 
 ### Connection Failed / Host Unreachable
 If the Android app cannot connect to the Windows client:
-1.  **Check Windows Firewall:** The firewall often blocks incoming video streams.
+1. **Check Windows Firewall:** The firewall often blocks incoming streams.
     * Search for **"Allow an app through Windows Firewall"** in the Start Menu.
-    * Find `VCamdroid.exe` in the list and ensure both **Private** and **Public** boxes are checked.
-2.  **Verify Network Visibility (Reverse Ping Test):**
-    Sometimes the phone cannot see the PC. To verify:
+    * Find `VCamdroid NEXT.exe` in the list and ensure both **Private** and **Public** boxes are checked.
+2. **Verify Network Visibility (Reverse Ping Test):**
     * Connect via USB (for the test command).
-    * Open a terminal in the VCamdroid folder and run: `adb shell ping -c 4 <PC_IP_ADDRESS>`
+    * Open a terminal in the VCamdroid NEXT folder and run: `adb shell ping -c 4 <PC_IP_ADDRESS>`
     * If you see "100% packet loss" or "unreachable," your PC's firewall or router settings (AP Isolation) are blocking the connection.
+
+### The app installs but does not replace the old VCamdroid
+VCamdroid NEXT uses a new application folder (`%LOCALAPPDATA%\Programs\VCamdroid NEXT`) and a new executable name. Uninstall the old **VCamdroid** entry from Windows if you no longer need it.
+
+### The Android app is rejected by MDM with "version code already exists"
+VCamdroid NEXT ships with a new version code (**200**). If your MDM still reports an older code, make sure you are uploading `VCamdroid-NEXT.apk` and not an older APK.
 
 ### USB Connection not working
 If the app does not detect your phone:
-1.  **Check ADB Devices:**
-    * Open a terminal in the VCamdroid folder.
+1. **Check ADB Devices:**
+    * Open a terminal in the VCamdroid NEXT folder.
     * Run: `adb devices`
-    * **If list is empty:** Your cable is bad or [Universal ADB Drivers](https://adb.clockworkmod.com/) are missing.
+    * **If the list is empty:** Your cable is bad or the [Universal ADB Drivers](https://adb.clockworkmod.com/) are missing.
     * **If "unauthorized":** Check your phone screen and tap "Allow" on the **"Allow USB Debugging?"** popup.
-2.  **Kill Conflicting ADB Processes:**
+2. **Kill Conflicting ADB Processes:**
     * Open **Task Manager** (`Ctrl + Shift + Esc`).
     * Search for `adb.exe` in the **Details** tab.
-    * Right-click and select **End Task**, then restart VCamdroid.
+    * Right-click and select **End Task**, then restart VCamdroid NEXT.
 
 ---
 
 ## Reporting Issues
 
-VCamdroid is a new project, and hardware compatibility varies across thousands of Android devices. Your feedback is crucial!
+VCamdroid NEXT is a community fork and hardware compatibility varies across thousands of Android devices. Your feedback is crucial.
 
-If you encounter a bug or crash, please open a [New Issue](https://github.com/darusc/VCamdroid/issues) and **attach the logs** to help us fix it faster.
+If you encounter a bug or crash, please open a [New Issue](https://github.com/YossefKhalil/VCamdroid-NEXT/issues) and attach the logs so we can fix it faster.
 
 ### How to get the logs:
-1.  **Android Logs:**
-    * Open the VCamdroid app on your phone.
+1. **Android Logs:**
+    * Open the VCamdroid NEXT app on your phone.
     * Tap the **Bug Icon** 🐞 in the top corner.
     * Click the **Save/Share** button to export the log file.
-2.  **Windows Logs:**
-    * Check the `vcamdroid.log` file inside the VCamdroid installation directory.
+2. **Windows Logs:**
+    * Check the `vcamdroid.log` file inside the VCamdroid NEXT installation directory.
     * Copy the text from the latest log file.
 
 **Please include:**
 * Phone Model (e.g., Samsung S21, Pixel 6)
 * Android Version
-* Connection Method (USB or Wi-Fi)\
+* Connection Method (USB or Wi-Fi)
+* VCamdroid NEXT version (2.0.0-NEXT)

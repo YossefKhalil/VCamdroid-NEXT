@@ -1,6 +1,7 @@
 #include "net/serializer.h"
 
 #include <string>
+#include <stdexcept>
 
 namespace Serializer
 {
@@ -37,17 +38,62 @@ namespace Serializer
 		buffer.insert(buffer.end(), value.begin(), value.end());
 	}
 
+	// Bounds-checked reader for wire data coming from the phone. Every field
+	// is validated before it is accessed so a truncated or malformed
+	// descriptor cannot read past the end of the buffer.
+	class Reader
+	{
+	public:
+		Reader(const uint8_t* data, size_t size) : data(data), size(size), offset(0) {}
+
+		uint8_t ReadByte()
+		{
+			Require(1);
+			return data[offset++];
+		}
+
+		uint16_t ReadU16()
+		{
+			Require(2);
+			uint8_t b0 = data[offset];
+			uint8_t b1 = data[offset + 1];
+			offset += 2;
+			return (b0 << 8) | b1;
+		}
+
+		std::string ReadString()
+		{
+			const uint16_t length = ReadU16();
+			Require(length);
+			std::string value(reinterpret_cast<const char*>(data + offset), length);
+			offset += length;
+			return value;
+		}
+
+		size_t Remaining() const { return size - offset; }
+
+	private:
+		void Require(size_t count)
+		{
+			if (offset + count > size)
+				throw std::runtime_error("Device descriptor is truncated");
+		}
+
+		const uint8_t* data;
+		size_t size;
+		size_t offset;
+	};
+
 	DeviceDescriptor DeserializeDeviceDescriptor(const uint8_t* bytes, size_t size)
 	{
-		int offset = 0;
+		Reader reader(bytes, size);
 
 		// Name is the first thing
 		// Each string is preceded by 2 bytes representing its size
-		auto name = std::string((const char*)& bytes[offset + 2], ReadInt16(bytes));
+		auto name = reader.ReadString();
 
 		// The RTSP url follows after the name
-		offset += 2 + name.size();
-		auto url = std::string((const char*)& bytes[offset + 2], ReadInt16(bytes + offset));
+		auto url = reader.ReadString();
 
 		// Default protocol is udp. If it is a usb connection (via adb) switch to tcp
 		std::string protocol = "udp";
@@ -56,56 +102,46 @@ namespace Serializer
 			protocol = "tcp";
 		}
 
-		offset += 2 + url.size();
 		// Represents how many resolutions are provided
-		uint16_t frontResolutionCount = ReadInt16(bytes + offset);
-		offset += 2;
+		uint16_t frontResolutionCount = reader.ReadU16();
 
 		std::vector<DeviceDescriptor::Resolution> frontResolutions;
 		for (int i = 0; i < frontResolutionCount; i++)
 		{
 			// Each resolutions is given in pairs, first 2 bytes represents 
 			// the width, the next 2 bytes represents the height
-			auto w = ReadInt16(bytes + offset);
-			auto h = ReadInt16(bytes + offset + 2);
+			auto w = reader.ReadU16();
+			auto h = reader.ReadU16();
 
 			frontResolutions.push_back(DeviceDescriptor::Resolution(w, h));
-
-			offset += 4;
 		}
 
-		uint16_t backResolutionCount = ReadInt16(bytes + offset);
-		offset += 2;
+		uint16_t backResolutionCount = reader.ReadU16();
 
 		std::vector<DeviceDescriptor::Resolution> backResolutions;
 		for (int i = 0; i < backResolutionCount; i++)
 		{
 			// Each resolutions is given in pairs, first 2 bytes represents 
 			// the width, the next 2 bytes represents the height
-			auto w = ReadInt16(bytes + offset);
-			auto h = ReadInt16(bytes + offset + 2);
+			auto w = reader.ReadU16();
+			auto h = reader.ReadU16();
 
 			backResolutions.push_back(DeviceDescriptor::Resolution(w, h));
-
-			offset += 4;
 		}
 
 		// How many filters
-		uint16_t filterCount = ReadInt16(bytes + offset);
-		offset += 2;
+		uint16_t filterCount = reader.ReadU16();
 
 		Video::Filter::Registry filters;
 		for (int i = 0; i < filterCount; i++)
 		{
 			// First 2 bytes represent the length of the filter name,
 			// followed by the actual string
-			auto name = std::string((const char*)&bytes[offset + 2], ReadInt16(bytes + offset));
-			offset += 2 + name.size();
+			auto filterName = reader.ReadString();
 			// And 1 more byte for the category
-			auto cat = static_cast<Video::Filter::Category>(bytes[offset]);
-			offset++;
+			auto cat = static_cast<Video::Filter::Category>(reader.ReadByte());
 
-			filters[cat].push_back(name);
+			filters[cat].push_back(filterName);
 		}
 
 		return DeviceDescriptor(name, url, protocol, frontResolutions, backResolutions, filters);
@@ -148,16 +184,13 @@ namespace Serializer
 
 	Connection::ErrorReport DeserializeErrorReport(const uint8_t* bytes, size_t size)
 	{
-		int offset = 0;
+		Reader reader(bytes, size);
 
 		Connection::ErrorReport report;
+		report.severity = reader.ReadByte();
+		report.error = reader.ReadString();
+		report.description = reader.ReadString();
 
-		report.severity = bytes[offset++];
-		report.error = std::string((const char*)&bytes[offset + 2], ReadInt16(bytes + offset));
-
-		offset += 2 + report.error.size();
-		report.description = std::string((const char*)&bytes[offset + 2], ReadInt16(bytes + offset));
-		
 		return report;
 	}
 }

@@ -1,47 +1,101 @@
 #include "gui/qrconview.h"
+#include "gui/theme.h"
 
-QrconView::QrconView(std::string name, std::string address, std::string port, wxSize displaySize) : wxDialog(nullptr, wxID_ANY, "Connect with QR code")
+#include <cstring>
+
+QrconView::QrconView(std::string name, std::string address, std::string port, wxSize displaySize)
+    : wxDialog(nullptr, wxID_ANY, "Connect with QR code", wxDefaultPosition, wxDefaultSize,
+        wxDEFAULT_DIALOG_STYLE)
 {
-	auto sizer = new wxBoxSizer(wxVERTICAL);
-	auto wrapper = new wxBoxSizer(wxVERTICAL);
+    SetBackgroundColour(Material::Colors().background);
 
-	auto qrcode = GenerateQRCode(address + ":" + port);
-	auto image = GenerateImageFromQR(qrcode);
+    auto mainSizer = new wxBoxSizer(wxVERTICAL);
 
-	wxStaticBitmap* canvas = new wxStaticBitmap(this, wxID_ANY, wxBitmap(image.Scale(displaySize)));
+    auto title = Material::Label(this, "Connect your phone", Material::TypeRole::HeadlineSmall);
+    mainSizer->Add(title, 0, wxALIGN_CENTER_HORIZONTAL | wxTOP, FromDIP(28));
 
-	wrapper->Add(new wxStaticText(this, wxID_ANY, "Scan the QR to connect automatically"), 0, wxALIGN_CENTER | wxTOP, FromDIP(30));
-	wrapper->Add(canvas, 0, wxALIGN_CENTER | wxALL, FromDIP(15));
-	wrapper->Add(new wxStaticText(this, wxID_ANY, wxString::Format("%s", name)), 0, wxALIGN_CENTER | wxBOTTOM, FromDIP(2));
-	wrapper->Add(new wxStaticText(this, wxID_ANY, wxString::Format("Address: %s", address)), 0, wxALIGN_CENTER);
-	wrapper->Add(new wxStaticText(this, wxID_ANY, wxString::Format("Port: %s", port)), 0, wxALIGN_CENTER | wxBOTTOM, FromDIP(30));
+    auto subtitle = Material::Label(this, "Scan this code with the VCamdroid Android app",
+        Material::TypeRole::BodySmall, Material::Colors().onSurfaceVariant);
+    mainSizer->Add(subtitle, 0, wxALIGN_CENTER_HORIZONTAL | wxTOP, FromDIP(6));
+    mainSizer->AddSpacer(FromDIP(20));
 
-	sizer->Add(wrapper, 1, wxALIGN_CENTER | wxLEFT | wxRIGHT, FromDIP(50));
+    auto qrcode = GenerateQRCode(address + ":" + port);
+    auto image = GenerateImageFromQR(qrcode);
 
-	this->SetSizerAndFit(sizer);
+    auto qrCard = new Material::Card(this, 20, Material::Shape::Large);
+    qrCard->SetBackdrop(Material::Colors().background);
+    qrCard->SetFill(*wxWHITE);
+
+    // Nearest-neighbour keeps the QR modules crisp when scaling up.
+    auto canvas = new wxStaticBitmap(qrCard, wxID_ANY,
+        wxBitmap(image.Scale(displaySize, wxIMAGE_QUALITY_NEAREST)));
+    canvas->SetBackgroundColour(*wxWHITE);
+    qrCard->Content()->Add(canvas, 0, wxALIGN_CENTER);
+    mainSizer->Add(qrCard, 0, wxALIGN_CENTER_HORIZONTAL | wxLEFT | wxRIGHT, FromDIP(40));
+
+    mainSizer->AddSpacer(FromDIP(20));
+
+    auto details = new Material::Card(this, 16, Material::Shape::Medium);
+    details->SetBackdrop(Material::Colors().background);
+    details->SetFill(Material::Colors().surfaceContainerHigh);
+
+    details->Content()->Add(Material::Label(details, name, Material::TypeRole::TitleSmall),
+        0, wxBOTTOM, FromDIP(6));
+    details->Content()->Add(Material::Label(details, wxString::Format("Address: %s", address),
+        Material::TypeRole::BodySmall, Material::Colors().onSurfaceVariant), 0);
+    details->Content()->Add(Material::Label(details, wxString::Format("Port: %s", port),
+        Material::TypeRole::BodySmall, Material::Colors().onSurfaceVariant), 0, wxTOP, FromDIP(2));
+
+    mainSizer->Add(details, 0, wxEXPAND | wxLEFT | wxRIGHT, FromDIP(40));
+    mainSizer->AddSpacer(FromDIP(20));
+
+    auto buttonRow = new wxBoxSizer(wxHORIZONTAL);
+    buttonRow->AddStretchSpacer(1);
+    auto closeButton = new Material::PillButton(this, "Done", Material::PillButton::Variant::Filled);
+    closeButton->SetBackdrop(Material::Colors().background);
+    closeButton->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { CallAfter([this]() { EndModal(wxID_OK); }); });
+    buttonRow->Add(closeButton, 0);
+    mainSizer->Add(buttonRow, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, FromDIP(24));
+
+    SetSizerAndFit(mainSizer);
+    CenterOnParent();
 }
 
 qrcodegen::QrCode QrconView::GenerateQRCode(std::string data)
 {
-	return qrcodegen::QrCode::encodeText(data.c_str(), qrcodegen::QrCode::Ecc::MEDIUM);
+    return qrcodegen::QrCode::encodeText(data.c_str(), qrcodegen::QrCode::Ecc::MEDIUM);
 }
 
 wxImage QrconView::GenerateImageFromQR(const qrcodegen::QrCode& qrcode)
 {
-	auto size = qrcode.getSize();
+    const int size = qrcode.getSize();
 
-	unsigned char* bytes = new unsigned char[size * size * 3];
+    // The QR specification requires a quiet zone of at least 4 modules.
+    // Without it ML Kit (and many other scanners) fail silently. Use a
+    // generous margin so the built-in dialog is as easy to scan as the
+    // fullscreen fallback that was needed before.
+    const int border = 8;
+    const int total = size + border * 2;
 
-	for (int y = 0; y < size; y++)
-	{
-		for (int x = 0; x < size; x++)
-		{
-			unsigned char value = qrcode.getModule(x, y) ? 0 : 255;
-			bytes[(y * size + x) * 3] = value;
-			bytes[(y * size + x) * 3 + 1] = value;
-			bytes[(y * size + x) * 3 + 2] = value;
-		}
-	}
+    // Let wxImage own the pixel buffer. (The old code allocated with new[]
+    // and handed it to wxImage, which frees it with free().)
+    wxImage image(total, total);
+    unsigned char* bytes = image.GetData();
+    std::memset(bytes, 255, static_cast<size_t>(total) * total * 3);
 
-	return wxImage(wxSize(size, size), bytes);
+    for (int y = 0; y < size; y++)
+    {
+        for (int x = 0; x < size; x++)
+        {
+            if (qrcode.getModule(x, y))
+            {
+                unsigned char* pixel = bytes + (static_cast<size_t>(y + border) * total + (x + border)) * 3;
+                pixel[0] = 0;
+                pixel[1] = 0;
+                pixel[2] = 0;
+            }
+        }
+    }
+
+    return image;
 }

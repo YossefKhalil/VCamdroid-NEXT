@@ -1,56 +1,85 @@
 #include "gui/devicesview.h"
+#include "gui/theme.h"
+
 #include <wx/listctrl.h>
 #include <algorithm> // For std::max_element
 
 DevicesView::DevicesView(wxWindow* parent, const std::vector<DeviceDescriptor>& devices)
-    : wxDialog(parent, wxID_ANY, "Connected Devices", wxDefaultPosition, wxSize(600, 300))
+    : wxDialog(parent, wxID_ANY, "Connected Devices", wxDefaultPosition, wxDefaultSize,
+        wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER)
 {
-    auto sizer = new wxBoxSizer(wxVERTICAL);
+    SetBackgroundColour(Material::Colors().background);
 
-    auto list = new wxListView(this, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxLC_REPORT | wxLC_SINGLE_SEL);
+    auto mainSizer = new wxBoxSizer(wxVERTICAL);
 
-    // Define Columns
-    list->AppendColumn("#", wxLIST_FORMAT_LEFT, 30);
-    list->AppendColumn("Model Name", wxLIST_FORMAT_LEFT, 150);
-    list->AppendColumn("RTSP URL", wxLIST_FORMAT_LEFT, 220);
-    list->AppendColumn("Max Back", wxLIST_FORMAT_LEFT, 90);  // New Column
-    list->AppendColumn("Max Front", wxLIST_FORMAT_LEFT, 90); // New Column
+    auto title = Material::Label(this, "Connected devices", Material::TypeRole::HeadlineSmall);
+    mainSizer->Add(title, 0, wxLEFT | wxRIGHT | wxTOP, FromDIP(24));
 
-    // Helper lambda to format the maximum resolution string
-    auto getMaxResString = [](const std::vector<DeviceDescriptor::Resolution>& resList) -> std::string {
-        if (resList.empty()) return "-";
+    auto subtitle = Material::Label(this, "Phones currently paired with this PC",
+        Material::TypeRole::BodySmall, Material::Colors().onSurfaceVariant);
+    mainSizer->Add(subtitle, 0, wxLEFT | wxRIGHT | wxTOP, FromDIP(24));
+    mainSizer->AddSpacer(FromDIP(16));
 
-        // Find resolution with the highest pixel count (width * height)
-        auto maxRes = *std::max_element(resList.begin(), resList.end(),
-            [](const DeviceDescriptor::Resolution& a, const DeviceDescriptor::Resolution& b) {
-                return (a.first * a.second) < (b.first * b.second);
-            });
+    auto card = new Material::Card(this, 16, Material::Shape::Medium);
+    card->SetBackdrop(Material::Colors().background);
 
-        return std::to_string(maxRes.first) + "x" + std::to_string(maxRes.second);
+    if (devices.empty())
+    {
+        auto empty = Material::Label(card, "No devices connected yet. Scan the QR code from the Android app.",
+            Material::TypeRole::BodyMedium, Material::Colors().onSurfaceVariant);
+        card->Content()->Add(empty, 0, wxALIGN_CENTER_HORIZONTAL | wxALL, FromDIP(12));
+    }
+    else
+    {
+        auto list = new wxListView(card, wxID_ANY, wxDefaultPosition, wxSize(FromDIP(660), FromDIP(260)),
+            wxLC_REPORT | wxLC_SINGLE_SEL | wxBORDER_NONE);
+
+        Material::StyleListView(list);
+
+        list->AppendColumn("#", wxLIST_FORMAT_LEFT, FromDIP(40));
+        list->AppendColumn("Model name", wxLIST_FORMAT_LEFT, FromDIP(190));
+        list->AppendColumn("RTSP URL", wxLIST_FORMAT_LEFT, FromDIP(260));
+        list->AppendColumn("Max back", wxLIST_FORMAT_LEFT, FromDIP(100));
+        list->AppendColumn("Max front", wxLIST_FORMAT_LEFT, FromDIP(100));
+
+        auto getMaxResString = [](const std::vector<DeviceDescriptor::Resolution>& resList) -> std::string {
+            if (resList.empty()) return "-";
+
+            auto maxRes = *std::max_element(resList.begin(), resList.end(),
+                [](const DeviceDescriptor::Resolution& a, const DeviceDescriptor::Resolution& b) {
+                    return (a.first * a.second) < (b.first * b.second);
+                });
+
+            return std::to_string(maxRes.first) + "x" + std::to_string(maxRes.second);
         };
 
-    for (size_t i = 0; i < devices.size(); i++)
-    {
-        const auto& dev = devices[i];
-        long index = list->InsertItem(i, std::to_string(i + 1));
+        for (size_t i = 0; i < devices.size(); i++)
+        {
+            const auto& dev = devices[i];
+            long index = list->InsertItem(i, std::to_string(i + 1));
 
-        list->SetItem(index, 1, dev.name());
-        list->SetItem(index, 2, dev.url());
+            list->SetItem(index, 1, dev.name());
+            list->SetItem(index, 2, dev.url());
+            list->SetItem(index, 3, getMaxResString(dev.backResolutions()));
+            list->SetItem(index, 4, getMaxResString(dev.frontResolutions()));
+        }
 
-        // 3. Max Back Resolution
-        list->SetItem(index, 3, getMaxResString(dev.backResolutions()));
-
-        // 4. Max Front Resolution
-        list->SetItem(index, 4, getMaxResString(dev.frontResolutions()));
+        card->Content()->Add(list, 1, wxEXPAND);
     }
 
-    sizer->Add(list, 1, wxEXPAND | wxALL, 10);
+    mainSizer->Add(card, 1, wxEXPAND | wxLEFT | wxRIGHT, FromDIP(24));
+    mainSizer->AddSpacer(FromDIP(16));
 
-    auto btnSizer = new wxBoxSizer(wxHORIZONTAL);
-    auto closeBtn = new wxButton(this, wxID_OK, "Close");
-    btnSizer->Add(closeBtn, 0);
-    sizer->Add(btnSizer, 0, wxALIGN_RIGHT | wxALL, 10);
+    auto buttonRow = new wxBoxSizer(wxHORIZONTAL);
+    buttonRow->AddStretchSpacer(1);
+    auto closeButton = new Material::PillButton(this, "Close", Material::PillButton::Variant::Filled);
+    closeButton->SetBackdrop(Material::Colors().background);
+    closeButton->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { CallAfter([this]() { EndModal(wxID_OK); }); });
+    buttonRow->Add(closeButton, 0);
+    mainSizer->Add(buttonRow, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, FromDIP(24));
 
-    this->SetSizer(sizer);
-    this->CenterOnParent();
+    SetSizerAndFit(mainSizer);
+    SetSize(FromDIP(wxSize(820, 500)));
+    SetMinSize(FromDIP(wxSize(620, 400)));
+    CenterOnParent();
 }

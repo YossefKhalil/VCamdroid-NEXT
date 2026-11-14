@@ -12,33 +12,49 @@ import com.darusc.vcamdroid.networking.PacketType
 import com.darusc.vcamdroid.rtsp.Streamer
 import com.darusc.vcamdroid.rtsp.StreamOptions
 import com.darusc.vcamdroid.util.Logger
+import com.pedro.encoder.utils.gl.AspectRatioMode
+import java.io.ByteArrayOutputStream
 
 class StreamActivity : AppCompatActivity(), SurfaceHolder.Callback, ConnectionManager.ConnectionStateCallback {
 
     private val TAG = "VCamdroid"
+
+    private companion object {
+        const val NEED_MORE_BYTES = -1
+        const val INVALID_PACKET = -2
+    }
 
     private lateinit var viewBinding: ActivityStreamBinding
 
     private val connectionManager = ConnectionManager.getInstance(this)
     private lateinit var streamer: Streamer
 
+    // TCP is a byte stream: one read can contain a partial packet or several
+    // coalesced packets. Accumulate bytes and only dispatch complete packets.
+    private val receiveAccumulator = ByteArrayOutputStream()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         viewBinding = ActivityStreamBinding.inflate(layoutInflater)
-        viewBinding.surfaceView.holder.addCallback(this)
+        viewBinding.root.keepScreenOn = true
+        viewBinding.surfaceView.setAspectRatioMode(AspectRatioMode.Adjust)
 
         setContentView(viewBinding.root)
+
+        connectionManager.setOnBytesReceivedCallback(::onBytesReceived)
+        streamer = Streamer(StreamOptions(), this, viewBinding.surfaceView)
+
+        // Register after the streamer exists. If the surface is already
+        // available this invokes surfaceCreated immediately.
+        viewBinding.surfaceView.holder.addCallback(this)
 
         // Disable navigating to logs activity for now as it breaks streaming
 //        viewBinding.logReportButton.setOnClickListener {
 //            val intent = Intent(this, LogActivity::class.java)
 //            startActivity(intent)
 //        }
-
-        connectionManager.setOnBytesReceivedCallback(::onBytesReceived)
-        streamer = Streamer(StreamOptions(), this, viewBinding.surfaceView)
     }
 
     override fun surfaceCreated(holder: SurfaceHolder) {
@@ -61,7 +77,31 @@ class StreamActivity : AppCompatActivity(), SurfaceHolder.Callback, ConnectionMa
     }
 
     private fun onBytesReceived(buffer: ByteArray, bytes: Int) {
-        println(buffer)
+        if (bytes <= 0) return
+        receiveAccumulator.write(buffer, 0, bytes)
+
+        var pending = receiveAccumulator.toByteArray()
+        while (pending.isNotEmpty()) {
+            when (val length = getPacketLength(pending)) {
+                NEED_MORE_BYTES -> break
+                INVALID_PACKET -> {
+                    // Drop one byte and try to resynchronize instead of
+                    // spinning forever on a corrupt header.
+                    pending = pending.copyOfRange(1, pending.size)
+                }
+                else -> {
+                    if (pending.size < length) break
+                    handlePacket(pending.copyOfRange(0, length))
+                    pending = pending.copyOfRange(length, pending.size)
+                }
+            }
+        }
+
+        receiveAccumulator.reset()
+        if (pending.isNotEmpty()) receiveAccumulator.write(pending)
+    }
+
+    private fun handlePacket(buffer: ByteArray) {
         // Packet type is always the first byte
         val type = buffer[0]
 
@@ -128,4 +168,69 @@ class StreamActivity : AppCompatActivity(), SurfaceHolder.Callback, ConnectionMa
             }
         }
     }
+
+    /**
+     * Returns the total length of the packet at the start of [data], or one of
+     * the NEED_MORE_BYTES / INVALID_PACKET sentinels. Control packets have no
+     * length prefix, so the length is derived from the packet type and, for
+     * variable-length packets, from their embedded string lengths.
+     */
+    private fun getPacketLength(data: ByteArray): Int {
+        if (data.isEmpty()) return NEED_MORE_BYTES
+
+        return when (data[0]) {
+            PacketType.ACTIVATION -> {
+                // 1 type byte + 11 int32 fields + u16 filter count
+                if (data.size < 47) return NEED_MORE_BYTES
+
+                var offset = 47
+                val filterCount = readU16(data, 45)
+                repeat(filterCount) {
+                    if (data.size < offset + 2) return NEED_MORE_BYTES
+                    val nameLength = readU16(data, offset)
+                    offset += 2
+                    // name + int32 slider value
+                    if (data.size < offset + nameLength + 4) return NEED_MORE_BYTES
+                    offset += nameLength + 4
+                }
+
+                if (data.size < offset + 2) return NEED_MORE_BYTES
+                val effectLength = readU16(data, offset)
+                offset += 2
+                if (data.size < offset + effectLength) return NEED_MORE_BYTES
+                offset + effectLength
+            }
+            PacketType.RESOLUTION -> 5
+            PacketType.CAMERA -> 1
+            PacketType.QUALITY -> 2
+            PacketType.CORRECTION_FILTER -> {
+                if (data.size < 2) NEED_MORE_BYTES
+                else {
+                    val length = 3 + (data[1].toInt() and 0xFF)
+                    if (data.size < length) NEED_MORE_BYTES else length
+                }
+            }
+            PacketType.EFFECT_FILTER -> {
+                if (data.size < 2) NEED_MORE_BYTES
+                else {
+                    val length = 2 + (data[1].toInt() and 0xFF)
+                    if (data.size < length) NEED_MORE_BYTES else length
+                }
+            }
+            PacketType.ROTATION,
+            PacketType.STABILIZATION,
+            PacketType.FLASH,
+            PacketType.FOCUS,
+            PacketType.CODEC,
+            PacketType.FPS,
+            PacketType.FLIP -> 2
+            PacketType.BITRATE -> 3
+            PacketType.ADAPTIVE_BITRATE,
+            PacketType.ZOOM -> 5
+            else -> INVALID_PACKET
+        }
+    }
+
+    private fun readU16(data: ByteArray, offset: Int): Int =
+        (data[offset].toInt() and 0xFF) or ((data[offset + 1].toInt() and 0xFF) shl 8)
 }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <wx/wx.h>
+#include <atomic>
 
 #include "gui/window.h"
 #include "net/server.h"
@@ -29,6 +30,8 @@ private:
 	std::unique_ptr<RTSP::Manager> rtspManager;
 	std::unique_ptr<DirectShowSource> dsSource;
 	SnapshotManager snapshotManager;
+	mutable std::atomic<bool> streamLive{ false };
+	int appliedThemeMode = 0;
 
 	StreamOptions& GetCurrentDeviceStreamOptions();
 	void BindEventListeners();
@@ -39,6 +42,9 @@ private:
 
 	void ShowAdjustmentsDialog(wxCommandEvent& event);
 	void ShowStreamConfigDialog(wxCommandEvent& event);
+
+	void SetThemeMode(int mode);
+	void ApplySettings();
 	
 	void OnMenuEvent(wxCommandEvent& event);
 	void OnWindowCloseEvent(wxCloseEvent& event);

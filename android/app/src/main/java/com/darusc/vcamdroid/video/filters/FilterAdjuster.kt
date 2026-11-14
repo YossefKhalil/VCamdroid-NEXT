@@ -36,7 +36,9 @@ object FilterAdjuster {
         },
 
         SaturationFilterRender::class.java to { f, p ->
-            (f as SaturationFilterRender).saturation = p * 2
+            // setSaturation expects -1..1 (0 = unchanged). Mapping 0..100
+            // directly to 0..2 made the default value of 50 an extreme boost.
+            (f as SaturationFilterRender).saturation = (p * 2) - 1
         },
 
         TemperatureFilterRender::class.java to { f, p ->
@@ -44,7 +46,9 @@ object FilterAdjuster {
         },
 
         SharpnessFilterRender::class.java to { f, p ->
-            (f as SharpnessFilterRender).sharpness = p
+            // 0 = no change in RootEncoder, so the neutral slider position (50)
+            // must map to 0 instead of a constant strong sharpening pass.
+            (f as SharpnessFilterRender).sharpness = ((p - 0.5f) * 2f).coerceIn(0f, 1f)
         },
     )
 }
