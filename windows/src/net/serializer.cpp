@@ -95,8 +95,11 @@ namespace Serializer
 		// The RTSP url follows after the name
 		auto url = reader.ReadString();
 
-		// Default protocol is udp. If it is a usb connection (via adb) switch to tcp
-		std::string protocol = "udp";
+		// Default protocol. Use TCP for both USB and Wi-Fi: RootEncoder serves the
+		// RTSP stream over TCP interleaved and UDP RTP packets are frequently
+		// dropped/blocked by home routers, which left the client retrying
+		// forever with "Immediate exit requested".
+		std::string protocol = "tcp";
 		if (url.find("127.0.0.1") != std::string::npos)
 		{
 			protocol = "tcp";

@@ -48,6 +48,9 @@ namespace RTSP
 		state.stopRequested = false;
 		state.lastActivityTime = FFmpegInterrupt::GetTimeMs();
 
+		logger << "[RTSP] Opening " << rtspUrl << " (" << rtspProtocol << "), stopRequested="
+			<< (state.stopRequested ? "true" : "false") << "\n";
+
 		AVDictionary* options = nullptr;
 		av_dict_set(&options, "rtsp_transport", rtspProtocol.c_str(), 0);
 		// Low latency settings
