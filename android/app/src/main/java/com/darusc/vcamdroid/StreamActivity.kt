@@ -283,5 +283,5 @@ class StreamActivity : AppCompatActivity(), SurfaceHolder.Callback, ConnectionMa
     }
 
     private fun readU16(data: ByteArray, offset: Int): Int =
-        (data[offset].toInt() and 0xFF) or ((data[offset + 1].toInt() and 0xFF) shl 8)
+        ((data[offset].toInt() and 0xFF) shl 8) or (data[offset + 1].toInt() and 0xFF)
 }
