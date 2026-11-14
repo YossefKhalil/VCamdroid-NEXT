@@ -12,6 +12,8 @@ import android.net.NetworkCapabilities
 import android.net.Uri
 import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.util.Log
 import android.util.Size
@@ -42,6 +44,16 @@ class MainActivity : AppCompatActivity(), ConnectionManager.ConnectionStateCallb
     private var camera: Camera? = null
 
     private var isConnecting = false
+
+    private val uiHandler = Handler(Looper.getMainLooper())
+    private val connectTimeout = Runnable {
+        if (isConnecting) {
+            isConnecting = false
+            Logger.log("MAIN", "Connection attempt timed out")
+            Toast.makeText(this, "Connection timed out. Scan the QR code again", Toast.LENGTH_LONG).show()
+            qrscanner.start()
+        }
+    }
 
     private val TAG = "VCamdroid"
 
@@ -102,10 +114,8 @@ class MainActivity : AppCompatActivity(), ConnectionManager.ConnectionStateCallb
     override fun onConnectionSuccessful(connectionMode: ConnectionManager.Mode) {
         runOnUiThread {
             isConnecting = false
+            uiHandler.removeCallbacks(connectTimeout)
             qrscanner.stop()
-            // Release the CameraX use cases before the RTSP streamer opens the
-            // camera, otherwise both sessions can fight over the device.
-            camera?.stop()
             Logger.log("MAIN", "Connection successful $connectionMode")
 
             val intent = Intent(this, StreamActivity::class.java)
@@ -115,6 +125,7 @@ class MainActivity : AppCompatActivity(), ConnectionManager.ConnectionStateCallb
 
     override fun onConnectionFailed(connectionMode: ConnectionManager.Mode) {
         runOnUiThread {
+            uiHandler.removeCallbacks(connectTimeout)
             if (connectionMode == ConnectionManager.Mode.USB && hasWifiConnection()) {
                 // If usb connection failed try again over wifi
                 connectWIFI()
@@ -180,6 +191,8 @@ class MainActivity : AppCompatActivity(), ConnectionManager.ConnectionStateCallb
                     isConnecting = true
                     qrscanner.stop()
                     Toast.makeText(this, "Connecting to ${result.address}:${result.port}", Toast.LENGTH_SHORT).show()
+                    uiHandler.removeCallbacks(connectTimeout)
+                    uiHandler.postDelayed(connectTimeout, 8000)
                     connectionManager.connect(result.address, result.port)
                 } else {
                     Logger.log("MAIN", "Invalid QR code")
