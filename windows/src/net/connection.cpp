@@ -26,9 +26,10 @@ void Connection::Read()
 	socket.async_read_some(asio::buffer(byteBuffer, sizeof(byteBuffer)), [this, self](asio::error_code ec, size_t bytes) {
 		if (!ec)
 		{
+			incoming.insert(incoming.end(), byteBuffer, byteBuffer + bytes);
 			try
 			{
-				onBytesReceived(this->shared_from_this(), (const uint8_t*)byteBuffer, bytes);
+				ProcessIncoming();
 			}
 			catch (const std::exception& e)
 			{
@@ -54,6 +55,43 @@ void Connection::Read()
 			Close();
 		}
 	});
+}
+
+// The phone sends status / error reports over the control connection. They
+// are small but can still be split across TCP reads, so accumulate until a
+// complete report is available.
+void Connection::ProcessIncoming()
+{
+	while (!incoming.empty())
+	{
+		size_t offset = 0;
+
+		// severity byte
+		if (incoming.size() < offset + 1)
+			return;
+		offset += 1;
+
+		auto readString = [&](std::string& value) -> bool {
+			if (incoming.size() < offset + 2)
+				return false;
+			const uint16_t length = static_cast<uint16_t>(
+				(static_cast<uint16_t>(incoming[offset]) << 8) | incoming[offset + 1]);
+			offset += 2;
+			if (incoming.size() < offset + length)
+				return false;
+			value.assign(reinterpret_cast<const char*>(incoming.data() + offset), length);
+			offset += length;
+			return true;
+		};
+
+		std::string error;
+		std::string description;
+		if (!readString(error) || !readString(description))
+			return;
+
+		onBytesReceived(shared_from_this(), incoming.data(), offset);
+		incoming.erase(incoming.begin(), incoming.begin() + offset);
+	}
 }
 
 void Connection::Send(std::string message)

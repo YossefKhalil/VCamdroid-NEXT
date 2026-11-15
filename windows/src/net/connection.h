@@ -3,6 +3,7 @@
 #include <memory>
 #include <functional>
 #include <atomic>
+#include <vector>
 #include <asio.hpp>
 
 #include "devicedescriptor.h"
@@ -48,6 +49,7 @@ private:
 	unsigned char byteBuffer[255];
 	std::atomic<bool> closed{ false };
 	int id = -1;
+	std::vector<uint8_t> incoming;
 
 	bool active;
 	DeviceDescriptor descriptor;
@@ -58,6 +60,7 @@ private:
 	/// This function is used only to detect when a device disconnects.
 	/// </summary>
 	void Read();
+	void ProcessIncoming();
 
 	void Send(std::string message);
 	void Send(const unsigned char* bytes, size_t size);

@@ -7,7 +7,9 @@
 
 namespace FFmpegInterrupt
 {
-    const int64_t TIMEOUT_MS = 3000;
+    // The RTSP handshake on a phone that is still starting its encoder can take
+    // a few seconds. Give it enough time before giving up.
+    const int64_t TIMEOUT_MS = 12000;
 
     struct State
     {

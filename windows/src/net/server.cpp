@@ -152,96 +152,17 @@ void Server::Close()
 
 void Server::TCPDoAccept()
 {
-	acceptor.async_accept([&, this](asio::error_code ec, tcp::socket socket) {
+	acceptor.async_accept([this](asio::error_code ec, tcp::socket socket) {
 		if (!ec)
 		{
 			logger << "[SERVER] Device connected." << socket.remote_endpoint() << std::endl;
 
-			// Never let a half-open connection block the I/O thread forever.
-			// The descriptor is small; five seconds is plenty.
-			{
-				DWORD timeoutMs = 5000;
-				setsockopt(socket.native_handle(), SOL_SOCKET, SO_RCVTIMEO,
-					reinterpret_cast<const char*>(&timeoutMs), sizeof(timeoutMs));
-			}
-
-			// Read the only message sent by the client (the device descriptor).
-			// The descriptor is variable-length, so read its fields exactly instead
-			// of assuming that one read_some() returns the whole message. A single
-			// read could also truncate descriptors larger than 512 bytes.
-			try
-			{
-				std::vector<uint8_t> buffer;
-
-				auto appendUInt16 = [&buffer](uint16_t value) {
-					buffer.push_back(static_cast<uint8_t>((value >> 8) & 0xFF));
-					buffer.push_back(static_cast<uint8_t>(value & 0xFF));
-				};
-				auto readExact = [&socket](void* data, size_t size) {
-					asio::read(socket, asio::buffer(data, size));
-				};
-				auto readUInt16 = [&socket]() {
-					uint8_t bytes[2];
-					asio::read(socket, asio::buffer(bytes, sizeof(bytes)));
-					return static_cast<uint16_t>((bytes[0] << 8) | bytes[1]);
-				};
-				auto readString = [&]() {
-					uint16_t length = readUInt16();
-					appendUInt16(length);
-					size_t offset = buffer.size();
-					buffer.resize(offset + length);
-					if (length > 0) {
-						readExact(buffer.data() + offset, length);
-					}
-				};
-				auto readResolutions = [&]() {
-					uint16_t count = readUInt16();
-					appendUInt16(count);
-					size_t offset = buffer.size();
-					size_t bytes = static_cast<size_t>(count) * 4;
-					buffer.resize(offset + bytes);
-					if (bytes > 0) {
-						readExact(buffer.data() + offset, bytes);
-					}
-				};
-
-				readString();       // device name
-				readString();       // RTSP URL
-				readResolutions();  // front camera resolutions
-				readResolutions();  // back camera resolutions
-
-				uint16_t filterCount = readUInt16();
-				appendUInt16(filterCount);
-				for (uint16_t i = 0; i < filterCount; ++i) {
-					readString();   // filter name
-					uint8_t category = 0;
-					readExact(&category, 1);
-					buffer.push_back(category);
-				}
-
-				auto descriptor = Serializer::DeserializeDeviceDescriptor(buffer.data(), buffer.size());
-
-				auto conn = std::make_shared<Connection>(
-					std::move(socket),
-					descriptor,
-					std::bind(&Server::OnConnectionDisconnected, this, std::placeholders::_1),
-					std::bind(&Server::OnConnectionReportingError, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3)
-				);
-				{
-					std::lock_guard<std::mutex> lock(connectionsMutex);
-					const int id = nextConnectionId++;
-					conn->SetId(id);
-					descriptor.SetConnectionId(id);
-					connections[id] = conn;
-				}
-				conn->Start();
-
-				connectionListener.OnDeviceConnected(descriptor);
-			}
-			catch (const std::exception& e)
-			{
-				logger << "[SERVER] Failed to read device descriptor: " << e.what() << std::endl;
-			}
+			// The descriptor is read asynchronously. A blocking read here would
+			// stall the whole I/O thread whenever a phone connected without
+			// sending anything, which killed the working connection.
+			auto sock = std::make_shared<tcp::socket>(std::move(socket));
+			sock->set_option(tcp::no_delay(true));
+			ReadDescriptor(sock, std::vector<uint8_t>());
 		}
 		else if (ec != asio::error::operation_aborted)
 		{
@@ -252,6 +173,122 @@ void Server::TCPDoAccept()
 			TCPDoAccept();
 		}
 	});
+}
+
+void Server::ReadDescriptor(std::shared_ptr<tcp::socket> socket, std::vector<uint8_t> buffer)
+{
+	auto chunk = std::make_shared<std::vector<char>>(4096);
+
+	socket->async_read_some(asio::buffer(*chunk),
+		[this, socket, buffer, chunk](asio::error_code ec, size_t bytes) mutable {
+			if (ec)
+			{
+				logger << "[SERVER] Failed to read device descriptor: " << ec.message() << std::endl;
+				return;
+			}
+
+			for (size_t i = 0; i < bytes; ++i)
+				buffer.push_back(static_cast<uint8_t>((*chunk)[i]));
+
+			std::string deviceName;
+			std::string deviceUrl;
+			std::vector<DeviceDescriptor::Resolution> frontResolutions;
+			std::vector<DeviceDescriptor::Resolution> backResolutions;
+			Video::Filter::Registry filters;
+			if (!TryParseDescriptor(buffer, deviceName, deviceUrl, frontResolutions, backResolutions, filters))
+			{
+				if (buffer.size() > 64 * 1024)
+				{
+					logger << "[SERVER] Device descriptor is too large\n";
+					return;
+				}
+				ReadDescriptor(socket, buffer);
+				return;
+			}
+
+			DeviceDescriptor descriptor(deviceName, deviceUrl, "tcp",
+				frontResolutions, backResolutions, filters);
+
+			auto conn = std::make_shared<Connection>(
+				std::move(*socket),
+				descriptor,
+				std::bind(&Server::OnConnectionDisconnected, this, std::placeholders::_1),
+				std::bind(&Server::OnConnectionReportingError, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3)
+			);
+			{
+				std::lock_guard<std::mutex> lock(connectionsMutex);
+				const int id = nextConnectionId++;
+				conn->SetId(id);
+				descriptor.SetConnectionId(id);
+				connections[id] = conn;
+			}
+			conn->Start();
+
+			connectionListener.OnDeviceConnected(descriptor);
+		});
+}
+
+// Parses the device descriptor out of the received bytes. Returns false when
+// more data is needed.
+bool Server::TryParseDescriptor(const std::vector<uint8_t>& data,
+	std::string& name, std::string& url,
+	std::vector<DeviceDescriptor::Resolution>& frontResolutions,
+	std::vector<DeviceDescriptor::Resolution>& backResolutions,
+	Video::Filter::Registry& filters)
+{
+	size_t offset = 0;
+
+	auto has = [&](size_t count) { return offset + count <= data.size(); };
+	auto readU16 = [&](uint16_t& value) -> bool {
+		if (!has(2)) return false;
+		value = static_cast<uint16_t>((data[offset] << 8) | data[offset + 1]);
+		offset += 2;
+		return true;
+	};
+	auto readString = [&](std::string& value) -> bool {
+		uint16_t length = 0;
+		if (!readU16(length)) return false;
+		if (!has(length)) return false;
+		value.assign(reinterpret_cast<const char*>(data.data() + offset), length);
+		offset += length;
+		return true;
+	};
+	auto readResolutions = [&](std::vector<DeviceDescriptor::Resolution>& list) -> bool {
+		uint16_t count = 0;
+		if (!readU16(count)) return false;
+		if (!has(static_cast<size_t>(count) * 4)) return false;
+		for (uint16_t i = 0; i < count; ++i)
+		{
+			const uint16_t width = static_cast<uint16_t>((data[offset] << 8) | data[offset + 1]);
+			const uint16_t height = static_cast<uint16_t>((data[offset + 2] << 8) | data[offset + 3]);
+			offset += 4;
+			list.push_back(DeviceDescriptor::Resolution(width, height));
+		}
+		return true;
+	};
+
+	if (!readString(name) || !readString(url))
+		return false;
+
+	if (!readResolutions(frontResolutions) || !readResolutions(backResolutions))
+		return false;
+
+	uint16_t filterCount = 0;
+	if (!readU16(filterCount))
+		return false;
+
+	for (uint16_t i = 0; i < filterCount; ++i)
+	{
+		std::string filterName;
+		if (!readString(filterName))
+			return false;
+		if (!has(1))
+			return false;
+		const auto category = static_cast<Video::Filter::Category>(data[offset++]);
+		filters[category].push_back(filterName);
+	}
+
+	return true;
 }
 
 void Server::OnConnectionDisconnected(std::shared_ptr<Connection> connection)

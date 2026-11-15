@@ -59,6 +59,12 @@ private:
 	mutable std::mutex connectionsMutex;
 
 	void TCPDoAccept();
+	void ReadDescriptor(std::shared_ptr<tcp::socket> socket, std::vector<uint8_t> buffer);
+	static bool TryParseDescriptor(const std::vector<uint8_t>& data,
+		std::string& name, std::string& url,
+		std::vector<DeviceDescriptor::Resolution>& frontResolutions,
+		std::vector<DeviceDescriptor::Resolution>& backResolutions,
+		Video::Filter::Registry& filters);
 	void OnConnectionDisconnected(std::shared_ptr<Connection> connection);
 	void OnConnectionReportingError(std::shared_ptr<Connection> connection, const uint8_t* bytes, size_t size);
 };
