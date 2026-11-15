@@ -14,7 +14,7 @@ struct StreamOptions
 	using FilterValueCache = std::map<std::string, int>;
 
 	int fps = 30;
-	std::pair<int, int> resolution = { 640, 480 };
+	std::pair<int, int> resolution = { 1280, 720 };
 	bool backCameraActive = true;
 
 	// Cached values of adjustment filters
