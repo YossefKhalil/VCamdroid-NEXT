@@ -206,6 +206,13 @@ void Server::ReadDescriptor(std::shared_ptr<tcp::socket> socket, std::vector<uin
 				return;
 			}
 
+			if (deviceName.empty() || deviceUrl.rfind("rtsp://", 0) != 0)
+			{
+				logger << "[SERVER] Ignoring malformed device descriptor (name=" << deviceName
+					<< ", url=" << deviceUrl << ")\n";
+				return;
+			}
+
 			DeviceDescriptor descriptor(deviceName, deviceUrl, "tcp",
 				frontResolutions, backResolutions, filters);
 

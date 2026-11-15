@@ -51,6 +51,12 @@ class ConnectionManager private constructor() : Connection.Listener {
     private val pendingBytes = java.io.ByteArrayOutputStream()
     private val pendingLock = Any()
 
+    // The desktop expects the device descriptor as the very first message on
+    // the control connection. Status reports are queued until it was sent.
+    private var descriptorSent = false
+    private val pendingReports = ArrayList<com.darusc.vcamdroid.networking.ErrorReport>()
+    private val reportLock = Any()
+
     private var tcpConn: TCPConnection? = null
 
     private var streamingEnabled = false
@@ -82,6 +88,10 @@ class ConnectionManager private constructor() : Connection.Listener {
      * Connect in WIFI mode.
      */
     fun connect(ipAddress: String, port: Int) {
+        synchronized(reportLock) {
+            descriptorSent = false
+            pendingReports.clear()
+        }
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 tcpConn = TCPConnection(ipAddress, port, false, this@ConnectionManager)
@@ -110,13 +120,49 @@ class ConnectionManager private constructor() : Connection.Listener {
 
     fun sendDescriptor(descriptor: DeviceDescriptor) {
         CoroutineScope(Dispatchers.IO).launch {
-            tcpConn?.send(descriptor.serialize())
+            try {
+                tcpConn?.send(descriptor.serialize())
+            } catch (e: Exception) {
+                Logger.log("CONNECTION MANAGER", "Failed to send descriptor: ${e.message}")
+                return@launch
+            }
+
+            // The descriptor must be the first message on the wire. Anything
+            // that was queued in the meantime is flushed now.
+            val queued = synchronized(reportLock) {
+                descriptorSent = true
+                val copy = ArrayList(pendingReports)
+                pendingReports.clear()
+                copy
+            }
+            for (report in queued) {
+                try {
+                    tcpConn?.send(report.serialize())
+                } catch (e: Exception) {
+                    Logger.log("CONNECTION MANAGER", "Failed to send report: ${e.message}")
+                }
+            }
         }
     }
 
     fun sendErrorReport(report: ErrorReport) {
         CoroutineScope(Dispatchers.IO).launch {
-            tcpConn?.send(report.serialize())
+            try {
+                val sendNow = synchronized(reportLock) {
+                    if (!descriptorSent) {
+                        pendingReports.add(report)
+                        false
+                    } else {
+                        true
+                    }
+                }
+                if (sendNow) {
+                    tcpConn?.send(report.serialize())
+                }
+            } catch (e: Exception) {
+                // A broken pipe must never take the app down.
+                Logger.log("CONNECTION MANAGER", "Failed to send report: ${e.message}")
+            }
         }
     }
 
