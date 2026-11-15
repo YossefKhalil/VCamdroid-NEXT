@@ -42,9 +42,28 @@ class StreamActivity : AppCompatActivity(), SurfaceHolder.Callback, ConnectionMa
 
     private lateinit var statusView: TextView
 
-    private fun setStatus(text: String) {
+    private fun setStatus(text: String, report: Boolean = true) {
         runOnUiThread {
             if (::statusView.isInitialized) statusView.text = text
+        }
+        if (report) reportState(text)
+    }
+
+    /**
+     * Sends a short status line to the desktop client so the PC log shows
+     * what the phone is doing without needing the on-screen overlay.
+     */
+    private fun reportState(text: String) {
+        try {
+            connectionManager.sendErrorReport(
+                com.darusc.vcamdroid.networking.ErrorReport(
+                    com.darusc.vcamdroid.networking.ErrorReport.Severity.WARNING,
+                    "phone",
+                    text
+                )
+            )
+        } catch (e: Exception) {
+            Logger.log("STREAM", "Failed to report state: ${e.message}")
         }
     }
 
@@ -76,6 +95,7 @@ class StreamActivity : AppCompatActivity(), SurfaceHolder.Callback, ConnectionMa
         streamer = Streamer(StreamOptions(), this, viewBinding.surfaceView)
         streamer.statusCallback = { setStatus(it) }
         connectionManager.setOnBytesReceivedCallback(::onBytesReceived)
+        reportState("StreamActivity ready, waiting for activation")
 
         // Register after the streamer exists. If the surface is already
         // available this invokes surfaceCreated immediately.
@@ -123,7 +143,7 @@ class StreamActivity : AppCompatActivity(), SurfaceHolder.Callback, ConnectionMa
     private fun onBytesReceived(buffer: ByteArray, bytes: Int) {
         if (bytes <= 0) return
         receiveAccumulator.write(buffer, 0, bytes)
-        setStatus("RX $bytes B (total ${receiveAccumulator.size()} B)")
+        setStatus("RX $bytes B (total ${receiveAccumulator.size()} B)", report = false)
 
         var pending = receiveAccumulator.toByteArray()
         while (pending.isNotEmpty()) {

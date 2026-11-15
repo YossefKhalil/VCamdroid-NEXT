@@ -3,6 +3,8 @@
 #include <atomic>
 #include <chrono>
 
+#include "logger.h"
+
 namespace FFmpegInterrupt
 {
     const int64_t TIMEOUT_MS = 3000;
@@ -30,12 +32,14 @@ namespace FFmpegInterrupt
         // Abort if a stop is requested
         if (state->stopRequested) 
         {
+            logger << "[RTSP INTERRUPT] Aborting: stop requested\n";
             return 1;
         }
 
-        // Abort if timeout duration is exceeded
-        if (GetTimeMs() - state->lastActivityTime > TIMEOUT_MS)
+        const int64_t idle = GetTimeMs() - state->lastActivityTime;
+        if (idle > TIMEOUT_MS)
         {
+            logger << "[RTSP INTERRUPT] Aborting: idle for " << idle << " ms\n";
             return 1;
         }
 
