@@ -20,6 +20,7 @@ import com.pedro.common.VideoCodec
 import com.pedro.encoder.input.gl.render.filters.BaseFilterRender
 import com.pedro.encoder.input.video.CameraHelper
 import com.pedro.encoder.input.video.CameraOpenException
+import com.pedro.encoder.utils.gl.AspectRatioMode
 import com.pedro.library.util.BitrateAdapter
 import com.pedro.library.view.OpenGlView
 import com.pedro.rtspserver.RtspServerCamera2
@@ -31,7 +32,7 @@ import java.util.logging.Filter
 class Streamer(
     private var options: StreamOptions,
     private val context: Context,
-    openGlView: OpenGlView,
+    private val openGlView: OpenGlView,
 ) : ConnectChecker {
 
     companion object {
@@ -378,10 +379,28 @@ class Streamer(
         Handler(Looper.getMainLooper()).post {
             val wasStreaming = rtspServerCamera2.isStreaming
 
-            rtspServerCamera2.stopStream()
-            rtspServerCamera2.stopPreview()
+            try {
+                rtspServerCamera2.stopStream()
+            } catch (e: Exception) {
+                Logger.log("STREAMER", "stopStream failed: ${e.message}")
+            }
+            try {
+                rtspServerCamera2.stopPreview()
+            } catch (e: Exception) {
+                Logger.log("STREAMER", "stopPreview failed: ${e.message}")
+            }
 
-            startPreview()
+            // Reopen the preview with the new resolution. The regular
+            // startPreview() is skipped while the camera is still closing,
+            // which left the preview at the old size and stretched the new
+            // stream.
+            try {
+                rtspServerCamera2.startPreview(options.camera, options.width, options.height)
+                openGlView.setAspectRatioMode(AspectRatioMode.Adjust)
+            } catch (e: Exception) {
+                Logger.log("STREAMER", "Preview restart failed: ${e.message}")
+            }
+
             if (wasStreaming) {
                 startStreamInternal()
             }

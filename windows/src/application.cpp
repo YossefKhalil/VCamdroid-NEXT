@@ -648,6 +648,10 @@ void Application::ShowStreamConfigDialog(wxCommandEvent& event)
 
 		rtspManager->SetResolution((uint16_t)w, (uint16_t)h);
 		stateRegistry[deviceName].resolution = { (int)w, (int)h };
+
+		// The phone has to restart its encoder for a new resolution, so the
+		// stream is interrupted for a moment. Say so instead of looking frozen.
+		mainWindow->SetStatus("Restarting", Material::Colors().tertiary);
 	});
 
 	dlg.Bind(EVT_STREAM_FPS_CHANGED, [this, deviceName](wxCommandEvent& e) 
@@ -655,6 +659,7 @@ void Application::ShowStreamConfigDialog(wxCommandEvent& event)
 		int fps = e.GetInt();
 		rtspManager->SetFPS(fps);
 		stateRegistry[deviceName].fps = fps;
+		mainWindow->SetStatus("Restarting", Material::Colors().tertiary);
 	});
 
 	dlg.Bind(EVT_STREAM_BITRATE_CHANGED, [this, deviceName, &dlg](wxCommandEvent& e) 
