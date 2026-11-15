@@ -24,6 +24,7 @@ namespace RTSP
 	
 		this->rtspProtocol = protocol;
 		this->rtspUrl = url;
+		receivedFrame = false;
 		isRunning = true;
 		workerThread = std::thread(&Receiver::WorkerFunc, this);
 	}
@@ -236,6 +237,7 @@ namespace RTSP
 
 				if (onFrameReceivedCallback) 
 				{
+					receivedFrame = true;
 					onFrameReceivedCallback(pFrame);
 				}
 			}

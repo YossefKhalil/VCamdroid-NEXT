@@ -19,6 +19,12 @@ namespace RTSP
 		// when the first packet arrives before the phone is listening.
 		SetRetryCallback([this]()
 		{
+			// Only nudge the phone while there is no video yet. A repeated
+			// activation makes the phone re-apply the codec, which fails once
+			// its RTSP server is running.
+			if (HasFrames())
+				return;
+
 			if (streamingDevice >= 0 && streamingDevice < static_cast<int>(descriptors.size()))
 			{
 				auto serialized = Serializer::SerializeStreamOptions(lastOptions);

@@ -48,14 +48,6 @@ class ConnectionManager private constructor() : Connection.Listener {
 
     private var connectionStateCallback: ConnectionStateCallback? = null
     private var onBytesReceivedCallback: ((buffer: ByteArray, bytes: Int) -> Unit)? = null
-    private val pendingBytes = java.io.ByteArrayOutputStream()
-    private val pendingLock = Any()
-
-    // The desktop expects the device descriptor as the very first message on
-    // the control connection. Status reports are queued until it was sent.
-    private var descriptorSent = false
-    private val pendingReports = ArrayList<com.darusc.vcamdroid.networking.ErrorReport>()
-    private val reportLock = Any()
 
     private var tcpConn: TCPConnection? = null
 
@@ -69,29 +61,14 @@ class ConnectionManager private constructor() : Connection.Listener {
      * The bytesReceivedListener is called only for packets of type different than PacketType.ACTIVATION.
      * These packets are handled internally
      */
-    fun setOnBytesReceivedCallback(onBytesReceivedCallback: ((buffer: ByteArray, bytes: Int) -> Unit)?) {
+    fun setOnBytesReceivedCallback(onBytesReceivedCallback: (buffer: ByteArray, bytes: Int) -> Unit) {
         this.onBytesReceivedCallback = onBytesReceivedCallback
-        // Flush any bytes that arrived before the callback was registered (race
-        // between the desktop's activation packet and StreamActivity creation).
-        if (onBytesReceivedCallback != null) {
-            synchronized(pendingLock) {
-                if (pendingBytes.size() > 0) {
-                    val buffered = pendingBytes.toByteArray()
-                    pendingBytes.reset()
-                    onBytesReceivedCallback(buffered, buffered.size)
-                }
-            }
-        }
     }
 
     /**
      * Connect in WIFI mode.
      */
     fun connect(ipAddress: String, port: Int) {
-        synchronized(reportLock) {
-            descriptorSent = false
-            pendingReports.clear()
-        }
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 tcpConn = TCPConnection(ipAddress, port, false, this@ConnectionManager)
@@ -124,23 +101,6 @@ class ConnectionManager private constructor() : Connection.Listener {
                 tcpConn?.send(descriptor.serialize())
             } catch (e: Exception) {
                 Logger.log("CONNECTION MANAGER", "Failed to send descriptor: ${e.message}")
-                return@launch
-            }
-
-            // The descriptor must be the first message on the wire. Anything
-            // that was queued in the meantime is flushed now.
-            val queued = synchronized(reportLock) {
-                descriptorSent = true
-                val copy = ArrayList(pendingReports)
-                pendingReports.clear()
-                copy
-            }
-            for (report in queued) {
-                try {
-                    tcpConn?.send(report.serialize())
-                } catch (e: Exception) {
-                    Logger.log("CONNECTION MANAGER", "Failed to send report: ${e.message}")
-                }
             }
         }
     }
@@ -148,34 +108,15 @@ class ConnectionManager private constructor() : Connection.Listener {
     fun sendErrorReport(report: ErrorReport) {
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                val sendNow = synchronized(reportLock) {
-                    if (!descriptorSent) {
-                        pendingReports.add(report)
-                        false
-                    } else {
-                        true
-                    }
-                }
-                if (sendNow) {
-                    tcpConn?.send(report.serialize())
-                }
+                tcpConn?.send(report.serialize())
             } catch (e: Exception) {
-                // A broken pipe must never take the app down.
                 Logger.log("CONNECTION MANAGER", "Failed to send report: ${e.message}")
             }
         }
     }
 
     override fun onBytesReceived(buffer: ByteArray, bytes: Int) {
-        val cb = onBytesReceivedCallback
-        if (cb != null) {
-            cb(buffer, bytes)
-        } else {
-            // Buffer until StreamActivity registers its handler.
-            synchronized(pendingLock) {
-                pendingBytes.write(buffer, 0, bytes)
-            }
-        }
+        onBytesReceivedCallback?.let { it(buffer, bytes) }
     }
 
     override fun onDisconnected() {

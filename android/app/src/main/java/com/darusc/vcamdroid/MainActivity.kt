@@ -30,7 +30,6 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.darusc.vcamdroid.databinding.ActivityMainBinding
 import com.darusc.vcamdroid.networking.ConnectionManager
-import com.darusc.vcamdroid.networking.ErrorReport
 import com.darusc.vcamdroid.util.Logger
 import com.darusc.vcamdroid.video.Camera
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
@@ -118,13 +117,6 @@ class MainActivity : AppCompatActivity(), ConnectionManager.ConnectionStateCallb
             uiHandler.removeCallbacks(connectTimeout)
             qrscanner.stop()
             Logger.log("MAIN", "Connection successful $connectionMode")
-            try {
-                connectionManager.sendErrorReport(
-                    ErrorReport(ErrorReport.Severity.WARNING, "phone", "TCP connected ($connectionMode)")
-                )
-            } catch (e: Exception) {
-                Logger.log("MAIN", "Failed to report connection: ${e.message}")
-            }
 
             val intent = Intent(this, StreamActivity::class.java)
             startActivity(intent)

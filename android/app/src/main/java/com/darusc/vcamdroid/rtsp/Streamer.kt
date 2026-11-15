@@ -285,20 +285,27 @@ class Streamer(
         this.options = newOptions
 
         Handler(Looper.getMainLooper()).post {
-            val needPreviewRestart = (oldOptions.width != newOptions.width) ||
-                    (oldOptions.height != newOptions.height) ||
-                    (oldOptions.camera != newOptions.camera)
+            try {
+                val needPreviewRestart = (oldOptions.width != newOptions.width) ||
+                        (oldOptions.height != newOptions.height) ||
+                        (oldOptions.camera != newOptions.camera)
 
-            if (needPreviewRestart && rtspServerCamera2.isOnPreview) {
-                rtspServerCamera2.stopPreview()
+                if (needPreviewRestart && rtspServerCamera2.isOnPreview) {
+                    rtspServerCamera2.stopPreview()
+                }
+
+                if (!rtspServerCamera2.isOnPreview) {
+                    startPreview()
+                }
+
+                applyOptionsToStream(newOptions)
+                startStreamInternal()
+            } catch (e: Exception) {
+                // A repeated activation packet arrives while the server is
+                // already running; that must never take the app down.
+                Logger.log("STREAMER", "startStream failed: ${e.message}")
+                statusCallback?.invoke("startStream failed: ${e.message}")
             }
-
-            if (!rtspServerCamera2.isOnPreview) {
-                startPreview()
-            }
-
-            applyOptionsToStream(newOptions)
-            startStreamInternal()
         }
     }
 
@@ -331,19 +338,39 @@ class Streamer(
      * Apply initial options
      */
     private fun applyOptionsToStream(options: StreamOptions) {
-        if (options.adaptiveBitrateEnabled) {
-            bitrateAdapter.setMaxBitrate(options.adaptiveBitrateMax)
-        } else {
-            rtspServerCamera2.setVideoBitrateOnFly(options.bitrate)
+        try {
+            if (options.adaptiveBitrateEnabled) {
+                bitrateAdapter.setMaxBitrate(options.adaptiveBitrateMax)
+            } else {
+                rtspServerCamera2.setVideoBitrateOnFly(options.bitrate)
+            }
+        } catch (e: Exception) {
+            Logger.log("STREAMER", "Failed to apply bitrate: ${e.message}")
         }
 
-        setStabilization(options.stabilization)
-        setFocus(options.focusMode)
-        rtspServerCamera2.setVideoCodec(if (options.h265Enabled) VideoCodec.H265 else VideoCodec.H264)
+        try {
+            setStabilization(options.stabilization)
+            setFocus(options.focusMode)
+        } catch (e: Exception) {
+            Logger.log("STREAMER", "Failed to apply camera options: ${e.message}")
+        }
 
-        options.activeEffectFilter?.let { rtspServerCamera2.glInterface.addFilter(it) }
-        options.activeCorrectionFilters.forEach {
-            rtspServerCamera2.glInterface.addFilter(it)
+        // The codec can only be changed while the RTSP server is stopped.
+        try {
+            if (!rtspServerCamera2.isStreaming) {
+                rtspServerCamera2.setVideoCodec(if (options.h265Enabled) VideoCodec.H265 else VideoCodec.H264)
+            }
+        } catch (e: Exception) {
+            Logger.log("STREAMER", "Failed to set codec: ${e.message}")
+        }
+
+        try {
+            options.activeEffectFilter?.let { rtspServerCamera2.glInterface.addFilter(it) }
+            options.activeCorrectionFilters.forEach {
+                rtspServerCamera2.glInterface.addFilter(it)
+            }
+        } catch (e: Exception) {
+            Logger.log("STREAMER", "Failed to apply filters: ${e.message}")
         }
     }
 

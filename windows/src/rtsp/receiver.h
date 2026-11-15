@@ -46,6 +46,11 @@ namespace RTSP
         /// </summary>
         void SetRetryCallback(std::function<void()> callback) { onRetryCallback = std::move(callback); }
 
+        /// <summary>
+        /// True once at least one frame has been decoded from the stream.
+        /// </summary>
+        bool HasFrames() const { return receivedFrame; }
+
     private:
 
         /// <summary>
@@ -68,5 +73,6 @@ namespace RTSP
 
         std::thread workerThread;
         std::atomic<bool> isRunning;
+        std::atomic<bool> receivedFrame{ false };
     };
 };
