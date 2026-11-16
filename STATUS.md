@@ -43,7 +43,7 @@ Root causes found and fixed (all were protocol bugs inherited from upstream):
 - TCP framing, connect timeout, EOF handling, exception-safe sends.
 - Preview restarted at the new resolution when the resolution changes.
 - Keep screen awake while streaming.
-- versionCode 210, versionName 2.0.10-NEXT.
+- versionCode 211, versionName 2.0.11-NEXT.
 
 ### Packaging
 - Installer: E:\Programs\Setup\VCamdroid\VCamdroid-NEXT-Setup.exe

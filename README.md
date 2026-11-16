@@ -43,7 +43,7 @@ The stream is hardware-encoded on the phone and decoded on the PC, so it stays s
 
 ## What's new in NEXT
 
-VCamdroid NEXT is version **2.0.10-NEXT** and is built on top of the original 1.3.x codebase. Highlights:
+VCamdroid NEXT is version **2.0.11-NEXT** and is built on top of the original 1.3.x codebase. Highlights:
 
 ### Streaming fixes
 
@@ -71,7 +71,7 @@ VCamdroid NEXT is version **2.0.10-NEXT** and is built on top of the original 1.
 - **Keep the screen awake** while streaming so the camera never sleeps.
 - **Robust TCP framing**, connect timeouts, clean EOF handling and exception-safe sends.
 - **Preview restarted at the new resolution** when you change it.
-- **Version 2.0.10-NEXT.**
+- **Version 2.0.11-NEXT.**
 
 ## Key features
 
@@ -164,7 +164,7 @@ Hardware varies a lot across Android devices, so reports are welcome. Open a [ne
 
 - phone model and Android version,
 - connection method (USB or Wi-Fi),
-- VCamdroid NEXT version (`2.0.10-NEXT`),
+- VCamdroid NEXT version (`2.0.11-NEXT`),
 - logs:
   - **Android:** tap the bug icon in the app and share the exported log.
   - **Windows:** attach `vcamdroid.log` from the installation folder.

@@ -144,6 +144,16 @@ class StreamActivity : AppCompatActivity(), SurfaceHolder.Callback, ConnectionMa
         val type = buffer[0]
         setStatus("Packet type 0x${type.toString(16)} (${buffer.size} B)")
 
+        try {
+            dispatchPacket(buffer, type)
+        } catch (e: Exception) {
+            // A bad command must never tear down the control connection.
+            Logger.log("STREAM", "Packet 0x${type.toString(16)} failed: ${e.message}")
+            setStatus("Command failed: ${e.message}")
+        }
+    }
+
+    private fun dispatchPacket(buffer: ByteArray, type: Byte) {
         when (type) {
             PacketType.ACTIVATION -> {
                 setStatus("Activation received, starting stream...")

@@ -267,11 +267,22 @@ class Streamer(
 
     fun setH265Codec(enabled: Boolean) {
         val codec = if (enabled) VideoCodec.H265 else VideoCodec.H264
-        rtspServerCamera2.setVideoCodec(codec)
-
-        // Only restart if we are actually streaming
-        if (rtspServerCamera2.isStreaming) {
-            restartStream()
+        try {
+            Handler(Looper.getMainLooper()).post {
+                val wasStreaming = rtspServerCamera2.isStreaming
+                try {
+                    // The codec can only be applied while the RTSP server is
+                    // stopped, so stop the stream and preview first.
+                    if (wasStreaming) rtspServerCamera2.stopStream()
+                    rtspServerCamera2.stopPreview()
+                    rtspServerCamera2.setVideoCodec(codec)
+                    reopenPreview(wasStreaming, 0)
+                } catch (e: Exception) {
+                    Logger.log("STREAMER", "Codec change failed: ${e.message}")
+                }
+            }
+        } catch (e: Exception) {
+            Logger.log("STREAMER", "setH265Codec failed: ${e.message}")
         }
     }
 
@@ -390,21 +401,35 @@ class Streamer(
                 Logger.log("STREAMER", "stopPreview failed: ${e.message}")
             }
 
-            // Reopen the preview with the new resolution. The regular
-            // startPreview() is skipped while the camera is still closing,
-            // which left the preview at the old size and stretched the new
-            // stream.
+            // The EGL window surface is released asynchronously. Creating the
+            // new preview immediately after stopPreview() fails with
+            // EGL_BAD_MATCH and leaves the preview at the old size, which
+            // stretches the stream. Retry until it succeeds.
+            reopenPreview(wasStreaming, 0)
+        }
+    }
+
+    private fun reopenPreview(wasStreaming: Boolean, attempt: Int) {
+        Handler(Looper.getMainLooper()).postDelayed({
+            var previewOk = false
             try {
                 rtspServerCamera2.startPreview(options.camera, options.width, options.height)
                 openGlView.setAspectRatioMode(AspectRatioMode.Adjust)
+                previewOk = true
+                Logger.log("STREAMER", "Preview restarted at ${options.width}x${options.height}")
             } catch (e: Exception) {
-                Logger.log("STREAMER", "Preview restart failed: ${e.message}")
+                Logger.log("STREAMER", "Preview restart failed (attempt ${attempt + 1}): ${e.message}")
+            }
+
+            if (!previewOk && attempt < 4) {
+                reopenPreview(wasStreaming, attempt + 1)
+                return@postDelayed
             }
 
             if (wasStreaming) {
                 startStreamInternal()
             }
-        }
+        }, if (attempt == 0) 250L else 500L)
     }
 
     /**
